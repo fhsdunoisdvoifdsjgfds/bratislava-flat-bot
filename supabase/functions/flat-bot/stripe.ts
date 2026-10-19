@@ -9,6 +9,28 @@ import { esc, say, SELF_URL, tg, token } from "./tg.ts";
 export const ACCESS_STATUSES = ["trialing", "active"];
 const BLOCKED_STATUSES = ["past_due", "unpaid", "canceled", "incomplete_expired", "paused"];
 const TRIAL_DAYS = 7;
+export const FREE_VIEWS = 5; // столько объявлений можно открыть без подписки
+
+// почта для проверки «триал уже был»: регистр, точки и +метки у Gmail не делают её новой
+export function normEmail(e: string) {
+  let [user, domain] = e.trim().toLowerCase().split("@");
+  if (!domain) return e.trim().toLowerCase();
+  user = user.split("+")[0];
+  if (domain === "gmail.com" || domain === "googlemail.com") {
+    user = user.replace(/\./g, "");
+    domain = "gmail.com";
+  }
+  return `${user}@${domain}`;
+}
+
+// триал с этой почтой уже брали на другом аккаунте Telegram
+async function trialTakenByEmail(chat: number) {
+  const [me] = await sql`select email_norm from flatbot.subscribers where chat_id = ${chat}`;
+  if (!me?.email_norm) return false;
+  const [other] = await sql`select 1 from flatbot.subscribers
+                            where email_norm = ${me.email_norm} and chat_id <> ${chat} and trial_used limit 1`;
+  return !!other;
+}
 
 export async function cfg() {
   const key = Deno.env.get("STRIPE_SECRET_KEY") || (await meta("stripe_secret_key")) || "";
@@ -63,10 +85,12 @@ export async function priceInfo() {
 
 export async function accessOf(chat: number) {
   const c = await cfg();
-  const [s] = await sql`select sub_status, trial_end, period_end, comp, trial_used, cancel_at_period_end, stripe_customer, email
+  const [s] = await sql`select sub_status, trial_end, period_end, comp, trial_used, cancel_at_period_end, stripe_customer, email,
+                          retention_used, (select count(*)::int from flatbot.free_views f where f.chat_id = ${chat}) as free_used
                         from flatbot.subscribers where chat_id = ${chat}`;
   const admin = await isAdmin(chat);
   const ok = !c.enabled || admin || !!s?.comp || ACCESS_STATUSES.includes(s?.sub_status);
+  const trialBlocked = await trialTakenByEmail(chat);
   return {
     ok,
     enabled: c.enabled,
@@ -75,7 +99,10 @@ export async function accessOf(chat: number) {
     trialEnd: s?.trial_end ?? null,
     periodEnd: s?.period_end ?? null,
     cancelAtPeriodEnd: !!s?.cancel_at_period_end,
-    trialAvailable: !s?.trial_used,
+    trialAvailable: !s?.trial_used && !trialBlocked,
+    retentionUsed: !!s?.retention_used,
+    // бесплатный просмотр до подписки: сколько объявлений уже открыто из FREE_VIEWS
+    preview: { used: s?.free_used ?? 0, limit: FREE_VIEWS },
     hasCustomer: !!s?.stripe_customer,
     email: s?.email ?? null,
   };
@@ -121,6 +148,7 @@ async function ensureCustomer(chat: number) {
 export async function payLink(chat: number): Promise<string> {
   const c = await cfg();
   const [s] = await sql`select stripe_sub, sub_status, trial_used from flatbot.subscribers where chat_id = ${chat}`;
+  const noTrial = !!s?.trial_used || (await trialTakenByEmail(chat));
   const customer = await ensureCustomer(chat);
   // есть подписка, которую можно оплатить/восстановить — через портал клиента
   if (s?.stripe_sub && ["past_due", "unpaid", "active", "trialing"].includes(s.sub_status)) {
@@ -138,14 +166,14 @@ export async function payLink(chat: number): Promise<string> {
     line_items: [{ price: c.price, quantity: 1 }],
     subscription_data: {
       metadata: { chat_id: chat },
-      trial_period_days: s?.trial_used ? undefined : TRIAL_DAYS,
+      trial_period_days: noTrial ? undefined : TRIAL_DAYS,
     },
     metadata: { chat_id: chat },
     allow_promotion_codes: true,
     success_url: await botLink("paid"),
     cancel_url: await botLink("pay_cancel"),
   });
-  await logEvent(chat, "checkout_open", { trial: !s?.trial_used });
+  await logEvent(chat, "checkout_open", { trial: !noTrial });
   return session.url;
 }
 
@@ -232,6 +260,11 @@ async function applySubscription(sub: any) {
     where chat_id = ${chat}`;
   await logEvent(chat, "subscription", { status: sub.status, prev: prev.sub_status ?? null });
 
+  if (sub.status === "trialing" && !prev.sub_status && (await cardAlreadyTrialed(sub, chat))) {
+    await stripe(`subscriptions/${sub.id}`, { trial_end: "now", proration_behavior: "none" }).catch((e) => console.error("trial_end", e));
+    await logEvent(chat, "trial_abuse", { sub: sub.id });
+    return; // придёт новое событие (active или past_due) — его и обработаем
+  }
   const wasOk = ACCESS_STATUSES.includes(prev.sub_status ?? "");
   const lang = langOr(prev.lang);
   const t = L(lang);
@@ -243,6 +276,25 @@ async function applySubscription(sub: any) {
     await say(chat, t("sub.active"));
   } else if (BLOCKED_STATUSES.includes(sub.status) && (wasOk || !prev.sub_status)) {
     await nag(chat, sub.status, lang);
+  }
+}
+
+// отпечаток карты: если с этой картой уже брали триал на другом аккаунте — повторный триал не даём
+async function cardAlreadyTrialed(sub: any, chat: number) {
+  try {
+    const pmId = sub.default_payment_method ??
+      (await stripe(`customers/${sub.customer}`, undefined, "GET")).invoice_settings?.default_payment_method;
+    if (!pmId) return false;
+    const pm = typeof pmId === "string" ? await stripe(`payment_methods/${pmId}`, undefined, "GET") : pmId;
+    const fp = pm?.card?.fingerprint;
+    if (!fp) return false;
+    const [seen] = await sql`select chat_id from flatbot.trial_cards where fingerprint = ${fp}`;
+    if (seen && Number(seen.chat_id) !== chat) return true;
+    await sql`insert into flatbot.trial_cards (fingerprint, chat_id) values (${fp}, ${chat}) on conflict do nothing`;
+    return false;
+  } catch (e) {
+    console.error("card fingerprint", e); // нет прав на PaymentMethods — просто не проверяем
+    return false;
   }
 }
 
@@ -346,3 +398,55 @@ export const paywallText = (p: any, lang: Lang = "en") =>
   p
     ? `${esc(Number(p.amount).toLocaleString(intlLocale(lang), { maximumFractionDigits: 2, useGrouping: false }))} ${p.currency === "EUR" ? "€" : esc(String(p.currency))}/${tr(lang, p.interval === "year" ? "price.year" : "price.month")}`
     : "";
+
+// ---------------------------------------------------------------- отмена и удержание
+async function subOf(chat: number) {
+  const [s] = await sql`select stripe_sub, sub_status, retention_used, settings, name, username from flatbot.subscribers where chat_id = ${chat}`;
+  return s;
+}
+
+async function tellAdmins(text: string) {
+  const admins = ((await meta("admins")) ?? []).map(Number);
+  for (const a of admins) await say(a, text).catch((e) => console.error("admin msg", e));
+}
+
+// «Дорого» → скидка 50% на следующий счёт, один раз на пользователя
+export async function retentionDiscount(chat: number) {
+  const s = await subOf(chat);
+  if (!s?.stripe_sub || !ACCESS_STATUSES.includes(s.sub_status)) return { error: "no_subscription" };
+  if (s.retention_used) return { error: "already_used" };
+  const COUPON = "byt-radar-retention-50";
+  await stripe(`coupons/${COUPON}`, undefined, "GET").catch(() =>
+    stripe("coupons", { id: COUPON, percent_off: 50, duration: "once", name: "Retention −50%" })
+  );
+  await stripe(`subscriptions/${s.stripe_sub}`, { discounts: [{ coupon: COUPON }] });
+  await sql`update flatbot.subscribers set retention_used = true where chat_id = ${chat}`;
+  await logEvent(chat, "retention_discount");
+  const lang = (s.settings?.lang ?? "en") as Lang;
+  await say(chat, L(lang)("retention.discountDone")).catch(() => {});
+  await tellAdmins(`🎁 ${esc(s.name || String(chat))}${s.username ? ` (@${esc(s.username)})` : ""} хотел отменить подписку, но взял скидку 50%.`);
+  return { ok: true };
+}
+
+// Отмена сразу: доступ и уведомления закрываются немедленно, приложение — на экране подписки
+export async function cancelNow(chat: number, reason: string, comment: string) {
+  const s = await subOf(chat);
+  if (!s?.stripe_sub) return { error: "no_subscription" };
+  // сначала помечаем у себя — чтобы вебхук не прислал «подписка закончилась, оплатите»
+  await sql`update flatbot.subscribers set sub_status = 'canceled', pay_nag_count = 99, cancel_reason = ${reason.slice(0, 40)},
+            canceled_at = now(), sub_updated_at = now() where chat_id = ${chat}`;
+  await sql`delete from flatbot.queue where chat_id = ${chat}`;
+  try {
+    await stripe(`subscriptions/${s.stripe_sub}`, undefined, "DELETE");
+  } catch (e) {
+    // не получилось в Stripe — возвращаем как было, чтобы не списать деньги с «отменённого»
+    await sql`update flatbot.subscribers set sub_status = ${s.sub_status}, pay_nag_count = 0, canceled_at = null where chat_id = ${chat}`;
+    throw e;
+  }
+  await logEvent(chat, "cancel", { reason, comment: comment.slice(0, 200) });
+  const lang = (s.settings?.lang ?? "en") as Lang;
+  const t = L(lang);
+  await say(chat, t("cancel.done"), { reply_markup: { inline_keyboard: [[{ text: t("cancel.back"), url: await payLink(chat) }]] } }).catch(() => {});
+  await tellAdmins(`❌ <b>${esc(s.name || String(chat))}</b>${s.username ? ` (@${esc(s.username)})` : ""} отменил подписку.\nПричина: ${esc(reason)}${comment ? `\n«${esc(comment.slice(0, 300))}»` : ""}`);
+  return { ok: true };
+}

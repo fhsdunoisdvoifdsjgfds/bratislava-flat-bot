@@ -112,6 +112,7 @@ async function locked(user: User | null) {
   if (!(await cfg()).enabled) return false;
   return !user || !(await accessOf(user.id)).ok;
 }
+const FREE_FEED = 48; // без подписки — только первые 2 страницы ленты
 
 async function feed(body: any, user: User | null) {
   const f: Filters = body.filters ?? {};
@@ -128,12 +129,16 @@ async function feed(body: any, user: User | null) {
     ${orderBy(body.sort ?? "new")}
     limit ${limit} offset ${offset}`;
   const total = Number(items[0]?.total_count ?? 0);
-  if (await locked(user)) return { items: [], total, paywall: true };
+  if (await locked(user)) {
+    // вне Telegram — ничего; в Telegram без подписки — пробный просмотр первых страниц
+    if (!user || offset >= FREE_FEED) return { items: [], total, paywall: true };
+    return { items: items.slice(0, Math.max(0, FREE_FEED - offset)), total, preview: true };
+  }
   return { items, total };
 }
 
 async function mapPoints(body: any, user: User | null) {
-  if (await locked(user)) return { points: [], paywall: true };
+  if (!user && (await locked(user))) return { points: [], paywall: true };
   const points = await sql`
     select l.key, l.lat, l.lng, coalesce(l.total, l.price) as total, l.kind
     from flatbot.listings l
@@ -144,7 +149,22 @@ async function mapPoints(body: any, user: User | null) {
 
 async function listing(body: any, user: User | null) {
   const key = String(body.key ?? "");
-  if (await locked(user)) return { error: "paywall" };
+  let stripContacts = false;
+  if (await locked(user)) {
+    if (!user) return { error: "paywall" };
+    stripContacts = !!body.peek; // превью на карте не тратит лимит, но и контактов не показывает
+    // пробный просмотр: до FREE_VIEWS разных объявлений; уже открытые можно открывать снова
+    const { FREE_VIEWS } = await import("./stripe.ts");
+    const [seen] = await sql`select 1 from flatbot.free_views where chat_id = ${user.id} and key = ${key}`;
+    if (!seen) {
+      const [{ n }] = await sql`select count(*)::int as n from flatbot.free_views where chat_id = ${user.id}`;
+      if (n >= FREE_VIEWS) return { error: "paywall" };
+      if (!body.peek) {
+        await sql`insert into flatbot.free_views (chat_id, key) values (${user.id}, ${key}) on conflict do nothing`;
+        await logEvent(user.id, "free_view", { key, n: n + 1 });
+      }
+    }
+  }
   if (user && !body.peek) await logEvent(user.id, "view", { key });
   const [l] = await sql`
     with ${MEDIANS}
@@ -182,7 +202,10 @@ async function listing(body: any, user: User | null) {
     ? await sql`select id, remind_at, note, sent from flatbot.reminders where chat_id = ${user.id} and key = ${key} order by remind_at`
     : [];
   return {
-    item: { ...l.data, key, total: S.total(l.data), posted_at: l.posted_at, first_seen: l.first_seen, seeded: l.seeded },
+    item: {
+      ...l.data, key, total: S.total(l.data), posted_at: l.posted_at, first_seen: l.first_seen, seeded: l.seeded,
+      ...(stripContacts ? { phones: [], emails: [], text: "", seller: null } : {}),
+    },
     median: l.median ? Math.round(l.median) : null,
     medianN: Number(l.median_n ?? 0),
     medianScope: l.median_scope,
@@ -405,9 +428,27 @@ export async function handleApi(body: any) {
       const { payLink, validEmail } = await import("./stripe.ts");
       if (body.email != null) {
         if (!validEmail(body.email)) return { error: "bad_email" };
-        await sql`update flatbot.subscribers set email = ${String(body.email).trim().toLowerCase()} where chat_id = ${u.id}`;
+        const { normEmail } = await import("./stripe.ts");
+        await sql`update flatbot.subscribers set email = ${String(body.email).trim().toLowerCase()},
+                  email_norm = ${normEmail(String(body.email))} where chat_id = ${u.id}`;
       }
       return { url: await payLink(u.id) };
+    }
+    case "retention_discount": {
+      const u = need();
+      const { retentionDiscount } = await import("./stripe.ts");
+      return await retentionDiscount(u.id);
+    }
+    case "cancel": {
+      const u = need();
+      const { cancelNow } = await import("./stripe.ts");
+      return await cancelNow(u.id, String(body.reason ?? "other"), String(body.comment ?? ""));
+    }
+    case "cancel_flow": {
+      // шаги удержания — только для журнала (что выбрал, от чего отказался)
+      const u = need();
+      await logEvent(u.id, "cancel_flow", { step: String(body.step ?? ""), reason: body.reason ?? null, choice: body.choice ?? null });
+      return { ok: true };
     }
     case "sub_check": {
       const u = need();

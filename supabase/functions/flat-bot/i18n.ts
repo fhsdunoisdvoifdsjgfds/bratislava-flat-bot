@@ -124,6 +124,10 @@ const en = {
   },
   "today.more": ". Showing the {limit} newest, the rest are in the app.",
   "today.locked": "🔒 New listings are available with a subscription.",
+  "cancel.done": "Your subscription is canceled. New listings are no longer sent and the app is locked. You can come back any time — the button below restarts it in a minute.",
+  "cancel.back": "🔁 Subscribe again",
+  "locked.any": "🔒 Access to the bot is available with a subscription. New listings across Slovakia within 10 minutes — subscribe to continue.",
+  "retention.discountDone": "🎁 Done — your next month is 50% off. Thanks for staying!",
 
   // команды
   "help":
@@ -262,6 +266,10 @@ const ru: Dict = {
   },
   "today.more": ". Показываю {limit} самых свежих, остальные — в приложении.",
   "today.locked": "🔒 Новые объявления доступны по подписке.",
+  "cancel.done": "Подписка отменена. Новые объявления больше не приходят, приложение закрыто. Вернуться можно в любой момент — кнопка ниже, это займёт минуту.",
+  "cancel.back": "🔁 Оформить снова",
+  "locked.any": "🔒 Бот доступен по подписке. Новые объявления по всей Словакии за 10 минут — оформите подписку, чтобы продолжить.",
+  "retention.discountDone": "🎁 Готово — следующий месяц со скидкой 50%. Спасибо, что остаётесь!",
 
   "help":
     "Я ищу квартиры и комнаты по всей Словакии на bazos.sk, nehnutelnosti.sk (+reality.sk, byty.sk), " +
@@ -393,6 +401,10 @@ const sk: Dict = {
   },
   "today.more": ". Posielam {limit} najnovších, ostatné nájdete v aplikácii.",
   "today.locked": "🔒 Nové inzeráty sú dostupné s predplatným.",
+  "cancel.done": "Predplatné je zrušené. Nové inzeráty už neprichádzajú a aplikácia je zamknutá. Vrátiť sa môžete kedykoľvek — tlačidlo nižšie, zaberie to minútu.",
+  "cancel.back": "🔁 Predplatiť znova",
+  "locked.any": "🔒 Bot je dostupný s predplatným. Nové inzeráty z celého Slovenska do 10 minút — predplaťte si, aby ste mohli pokračovať.",
+  "retention.discountDone": "🎁 Hotovo — budúci mesiac máte so zľavou 50 %. Ďakujeme, že zostávate!",
 
   "help":
     "Hľadám byty a izby na celom Slovensku na bazos.sk, nehnutelnosti.sk (+reality.sk, byty.sk), " +
@@ -524,6 +536,10 @@ const uk: Dict = {
   },
   "today.more": ". Показую {limit} найсвіжіших, решта — у застосунку.",
   "today.locked": "🔒 Нові оголошення доступні за підпискою.",
+  "cancel.done": "Підписку скасовано. Нові оголошення більше не надходять, застосунок закрито. Повернутися можна будь-коли — кнопка нижче, це займе хвилину.",
+  "cancel.back": "🔁 Оформити знову",
+  "locked.any": "🔒 Бот доступний за підпискою. Нові оголошення по всій Словаччині за 10 хвилин — оформіть підписку, щоб продовжити.",
+  "retention.discountDone": "🎁 Готово — наступний місяць зі знижкою 50%. Дякуємо, що залишаєтеся!",
 
   "help":
     "Я шукаю квартири й кімнати по всій Словаччині на bazos.sk, nehnutelnosti.sk (+reality.sk, byty.sk), " +
@@ -655,6 +671,10 @@ const be: Dict = {
   },
   "today.more": ". Паказваю {limit} самых свежых, астатнія — у праграме.",
   "today.locked": "🔒 Новыя аб’явы даступныя па падпісцы.",
+  "cancel.done": "Падпіска скасавана. Новыя аб’явы больш не прыходзяць, дадатак закрыты. Вярнуцца можна ў любы момант — кнопка ніжэй, гэта зойме хвіліну.",
+  "cancel.back": "🔁 Аформіць зноў",
+  "locked.any": "🔒 Бот даступны па падпісцы. Новыя аб’явы па ўсёй Славакіі за 10 хвілін — аформіце падпіску, каб працягнуць.",
+  "retention.discountDone": "🎁 Гатова — наступны месяц са зніжкай 50%. Дзякуй, што застаяцеся!",
 
   "help":
     "Я шукаю кватэры і пакоі па ўсёй Славакіі на bazos.sk, nehnutelnosti.sk (+reality.sk, byty.sk), " +

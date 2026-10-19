@@ -348,6 +348,14 @@ async function handleUpdate(u: any) {
     await say(chat_id, acc.ok ? t("paid.ok") : t("paid.wait"), { reply_markup: appButton(lang) });
     return;
   }
+  // без подписки (после настройки) в бот не пускаем: на любое сообщение — только предложение оформить
+  const [meOnb] = await sql`select onboarded from flatbot.subscribers where chat_id = ${chat_id}`;
+  if (acc.enabled && !acc.ok && meOnb?.onboarded && cmd !== "/stop") {
+    await say(chat_id, t(cmd === "/today" ? "today.locked" : "locked.any"), {
+      reply_markup: await payButton(acc.trialAvailable ? t("btn.startTrial") : t("btn.subscribe")),
+    });
+    return;
+  }
   if (cmd === "/status") {
     const lc = await meta("last_check");
     const lines = lc ? Object.entries(lc.stats).map(([k, v]) => statusLine(t, k, v)).join("\n") : t("status.never");

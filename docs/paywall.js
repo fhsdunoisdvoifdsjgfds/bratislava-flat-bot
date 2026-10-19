@@ -18,6 +18,7 @@
       secure: "Безопасная оплата через Stripe", err: "Не получилось открыть оплату. Попробуйте ещё раз.",
       st: { free: "Бесплатный доступ", comp: "Бесплатный доступ", admin: "Админ — бесплатно", trialing: "Пробный период до {d}", active: "Активна до {d}", activeCancel: "Активна до {d}, не продлится", past_due: "Оплата не прошла", unpaid: "Оплата не прошла", canceled: "Закончилась", none: "Не оформлена" },
       row: "Подписка",
+      later: "Сначала осмотреться", left: "Бесплатно можно открыть ещё {n} из {m} объявлений", limitT: "Бесплатный просмотр закончился",
     },
     en: {
       badge: "7 days free", title: "Be the first to know", sub: "A subscription unlocks new listings across Slovakia — in the app and in the bot chat.",
@@ -32,6 +33,7 @@
       secure: "Secure payment via Stripe", err: "Couldn't open checkout. Please try again.",
       st: { free: "Free access", comp: "Free access", admin: "Admin — free", trialing: "Trial until {d}", active: "Active until {d}", activeCancel: "Active until {d}, won't renew", past_due: "Payment failed", unpaid: "Payment failed", canceled: "Ended", none: "Not subscribed" },
       row: "Subscription",
+      later: "Look around first", left: "You can open {n} more of {m} listings for free", limitT: "Free preview is over",
     },
     sk: {
       badge: "7 dní zadarmo", title: "Dozviete sa o bývaní ako prví", sub: "Predplatné odomkne nové inzeráty z celého Slovenska — v aplikácii aj v chate s botom.",
@@ -46,6 +48,7 @@
       secure: "Bezpečná platba cez Stripe", err: "Platbu sa nepodarilo otvoriť. Skúste znova.",
       st: { free: "Prístup zadarmo", comp: "Prístup zadarmo", admin: "Admin — zadarmo", trialing: "Skúšobné obdobie do {d}", active: "Aktívne do {d}", activeCancel: "Aktívne do {d}, nepredĺži sa", past_due: "Platba neprešla", unpaid: "Platba neprešla", canceled: "Skončilo", none: "Nepredplatené" },
       row: "Predplatné",
+      later: "Najprv sa poobzerať", left: "Zadarmo môžete otvoriť ešte {n} z {m} inzerátov", limitT: "Bezplatná ukážka skončila",
     },
     uk: {
       badge: "7 днів безкоштовно", title: "Дізнавайтеся про житло першими", sub: "Підписка відкриває нові оголошення по всій Словаччині — у застосунку та в чаті з ботом.",
@@ -60,6 +63,7 @@
       secure: "Безпечна оплата через Stripe", err: "Не вдалося відкрити оплату. Спробуйте ще раз.",
       st: { free: "Безкоштовний доступ", comp: "Безкоштовний доступ", admin: "Адмін — безкоштовно", trialing: "Пробний період до {d}", active: "Активна до {d}", activeCancel: "Активна до {d}, не продовжиться", past_due: "Оплата не пройшла", unpaid: "Оплата не пройшла", canceled: "Закінчилася", none: "Не оформлена" },
       row: "Підписка",
+      later: "Спочатку роздивитися", left: "Безкоштовно можна відкрити ще {n} з {m} оголошень", limitT: "Безкоштовний перегляд закінчився",
     },
     be: {
       badge: "7 дзён бясплатна", title: "Даведвайцеся пра жыллё першымі", sub: "Падпіска адкрывае новыя аб'явы па ўсёй Славакіі — у дадатку і ў чаце з ботам.",
@@ -74,6 +78,7 @@
       secure: "Бяспечная аплата праз Stripe", err: "Не атрымалася адкрыць аплату. Паспрабуйце яшчэ раз.",
       st: { free: "Бясплатны доступ", comp: "Бясплатны доступ", admin: "Адмін — бясплатна", trialing: "Пробны перыяд да {d}", active: "Актыўная да {d}", activeCancel: "Актыўная да {d}, не падоўжыцца", past_due: "Аплата не прайшла", unpaid: "Аплата не прайшла", canceled: "Скончылася", none: "Не аформлена" },
       row: "Падпіска",
+      later: "Спачатку агледзецца", left: "Бясплатна можна адкрыць яшчэ {n} з {m} аб’яў", limitT: "Бясплатны прагляд скончыўся",
     },
   };
   const LOC = { ru: "ru-RU", en: "en-GB", sk: "sk-SK", uk: "uk-UA", be: "be-BY" };
@@ -96,12 +101,15 @@
   }
 
   let open = null;
-  function show({ access, price, onUnlocked } = {}) {
+  // closable — после онбординга можно закрыть и немного осмотреться (пробный просмотр)
+  function show({ access, price, onUnlocked, closable = false } = {}) {
     if (open) return open;
     const api = window.FBApp.api;
     const t = L();
     const blocked = ["past_due", "unpaid"].includes(access?.status);
     const ended = ["canceled", "incomplete_expired", "paused"].includes(access?.status);
+    const pv = access?.preview;
+    const limitHit = !closable && pv && pv.used >= pv.limit && !blocked && !ended;
     const trial = access?.trialAvailable !== false && !blocked;
     const cta = blocked ? t.ctaPay : trial ? t.ctaTrial : t.cta;
     const ov = document.createElement("div");
@@ -110,7 +118,7 @@
       <div class="fbp-hero">
         <span class="fbp-badge">${esc(blocked ? "⚠️" : ended ? "⛔️" : "🎁")} ${esc(blocked ? t.pastDue : ended ? t.canceled : trial ? t.badge : t.row)}</span>
         <div class="fbp-lock">🔓</div>
-        <h1>${esc(blocked ? t.pastDue : ended ? t.canceled : t.title)}</h1>
+        <h1>${esc(blocked ? t.pastDue : ended ? t.canceled : limitHit ? t.limitT : t.title)}</h1>
         <p>${esc(blocked ? t.pastDueSub : ended ? t.canceledSub : t.sub)}</p>
       </div>
       <div class="fbp-body">
@@ -127,6 +135,7 @@
       <div class="fbp-foot">
         <button class="fbp-cta">${esc(cta)}</button>
         <button class="fbp-check">${esc(t.check)}</button>
+        ${closable ? `<button class="fbp-later">${esc(t.later)}${pv ? ` · ${esc(t.left.replace("{n}", Math.max(0, pv.limit - pv.used)).replace("{m}", pv.limit))}` : ""}</button>` : ""}
       </div>`;
     document.body.append(ov);
     document.documentElement.classList.add("fbp-lock-scroll");
@@ -189,8 +198,27 @@
         }
       };
       checkBtn.onclick = () => (haptic(), check(false));
+      const later = ov.querySelector(".fbp-later");
+      if (later) later.onclick = () => {
+        haptic();
+        clearInterval(poll);
+        ov.classList.add("out");
+        setTimeout(() => (ov.remove(), document.documentElement.classList.remove("fbp-lock-scroll")), 300);
+        open = null;
+        resolve(false);
+      };
     }));
   }
 
-  window.FBPaywall = { show, status, label: () => L().row };
+  // плашка в ленте во время пробного просмотра
+  function banner(a) {
+    const t = L();
+    const pv = a?.preview;
+    if (!pv) return "";
+    const left = Math.max(0, pv.limit - pv.used);
+    return `<div class="fbp-banner"><span>🔓 ${esc(t.left.replace("{n}", left).replace("{m}", pv.limit))}</span>
+      <button data-paywall>${esc(a.trialAvailable ? t.ctaTrial : t.cta)}</button></div>`;
+  }
+
+  window.FBPaywall = { show, status, banner, label: () => L().row };
 })();

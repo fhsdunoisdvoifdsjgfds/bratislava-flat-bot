@@ -613,6 +613,7 @@
     try {
       const r = await api("feed", { filters: { ...st.filters, q: st.q }, sort: st.sort, offset: f.offset, limit: 24 });
       if (r.paywall) showPaywall();
+      if (r.preview && reset) paintPreviewBanner();
       if (gen !== f.gen) return;
       if (reset) $("#feed").innerHTML = "";
       f.items.push(...r.items);
@@ -1066,9 +1067,14 @@
     let r;
     try {
       r = await api("listing", { key });
+      // пробный просмотр: засчитываем открытое объявление
+      if (needPaywall() && st.me.access.preview && !r.item?.peek) {
+        refreshAccess();
+      }
     } catch (e) {
       if (e.message === "paywall") {
         closeLayer();
+        await refreshAccess();
         showPaywall();
         return;
       }
@@ -1643,13 +1649,35 @@
       haptic.tap();
       const a = st.me.access;
       // подписка есть — открываем портал Stripe (смена карты, отмена), иначе — экран подписки
-      if (["trialing", "active", "past_due", "unpaid"].includes(a.status)) {
+      if (["trialing", "active"].includes(a.status) && window.FBCancel) {
+        window.FBCancel.manage({
+          access: a, price: st.me.price,
+          // отменил — сразу закрываем приложение экраном подписки
+          onCanceled: async () => {
+            await refreshAccess();
+            showPaywall();
+          },
+          onAction: async (what) => {
+            if (what === "digest") {
+              st.settings = { ...st.settings, notify: { ...st.settings.notify, mode: "digest", digestTimes: ["09:00", "19:00"] } };
+              await saveSettings();
+              go("settings");
+            } else if (what === "filters") {
+              openLocation(st.settings, async () => {
+                st.filters = filtersFrom(st.settings);
+                await saveSettings();
+                go("settings");
+              });
+            }
+          },
+        });
+      } else if (["past_due", "unpaid"].includes(a.status)) {
         try {
           openLink((await api("pay")).url);
         } catch {
           toast("Stripe ✕");
         }
-      } else if (!a.ok) showPaywall();
+      } else if (!a.ok) showPaywall({ closable: previewLeft() > 0 });
     });
     $("#s-save").onclick = async () => {
       st.settings = s;
@@ -1758,7 +1786,7 @@
       }
       await saveSettings(true);
       go("feed");
-      if (needPaywall()) showPaywall(); // подписка оформляется сразу после настройки
+      if (needPaywall()) showPaywall({ closable: previewLeft() > 0 }); // сразу после настройки — можно закрыть и осмотреться
     }
     next.onclick = () => {
       haptic.tap();
@@ -1822,7 +1850,7 @@
     renderTabs();
     go("feed");
     if (!onboarded) onboarding();
-    else if (needPaywall()) showPaywall();
+    else if (needPaywall() && previewLeft() <= 0) showPaywall(); // пробный просмотр закончился — только подписка
 
     // ссылка на конкретное объявление: #l=bazos:123 или start_param бота
     const fromHash = new URLSearchParams(location.hash.slice(1)).get("l");
@@ -1833,12 +1861,16 @@
   // ---------------------------------------------------------------- подписка (paywall.js)
   const needPaywall = () => !!(inTG && st.me?.access?.enabled && !st.me.access.ok);
   let paywallOpen = false;
-  async function showPaywall() {
+  const previewLeft = () => {
+    const pv = st.me?.access?.preview;
+    return pv ? Math.max(0, pv.limit - pv.used) : 0;
+  };
+  async function showPaywall({ closable = false } = {}) {
     if (paywallOpen || !window.FBPaywall || !inTG) return;
     paywallOpen = true;
     try {
       await window.FBPaywall.show({
-        access: st.me?.access, price: st.me?.price,
+        access: st.me?.access, price: st.me?.price, closable,
         onUnlocked: async () => {
           try {
             st.me.access = (await api("access")).access;
@@ -1849,6 +1881,25 @@
     } finally {
       paywallOpen = false;
     }
+  }
+
+  async function refreshAccess() {
+    try {
+      st.me.access = (await api("access")).access;
+    } catch { /* сеть */ }
+    paintPreviewBanner();
+  }
+  // плашка «бесплатно можно открыть ещё N из 5» над лентой
+  function paintPreviewBanner() {
+    $("#preview-banner")?.remove();
+    if (!needPaywall() || !window.FBPaywall || st.tab !== "feed") return;
+    const html = window.FBPaywall.banner(st.me.access);
+    const anchor = $("#feedtop");
+    if (!html || !anchor) return;
+    const b = el(html);
+    b.id = "preview-banner";
+    anchor.after(b);
+    $("[data-paywall]", b).onclick = () => showPaywall({ closable: previewLeft() > 0 });
   }
 
   // для админ-панели (admin.js): небольшой набор внутренних помощников

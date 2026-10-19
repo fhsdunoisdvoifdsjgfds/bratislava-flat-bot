@@ -47,3 +47,9 @@
 @keyframes fbp-rot { to { transform: rotate(360deg); } }
 @media (min-width: 640px) { .fbp > * { width: 100%; max-width: 560px; margin-left: auto; margin-right: auto; } }
 .fbp > * { flex-shrink: 0; } /* иначе шапка сжимается и обрезает подзаголовок */
+
+.fbp-later { height: 38px; color: var(--hint); font-size: 13.5px; font-weight: 600; }
+
+.fbp-banner { margin: 8px 16px 4px; padding: 12px 14px; border-radius: 16px; display: flex; gap: 10px; align-items: center; justify-content: space-between;
+  background: linear-gradient(135deg, color-mix(in srgb, #12a46c 16%, var(--surface)), var(--surface)); box-shadow: 0 0 0 1.5px color-mix(in srgb, #12a46c 35%, transparent) inset; font-size: 13.5px; font-weight: 600; }
+.fbp-banner button { flex: none; height: 36px; padding: 0 12px; border-radius: 11px; background: #12a46c; color: #fff; font-weight: 700; font-size: 13px; }
