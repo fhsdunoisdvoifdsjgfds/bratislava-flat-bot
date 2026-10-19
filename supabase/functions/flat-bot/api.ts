@@ -128,7 +128,7 @@ async function listing(body: any, user: User | null) {
   const key = String(body.key ?? "");
   const [l] = await sql`
     with ${MEDIANS}
-    select l.data, l.posted_at, l.first_seen, l.total,
+    select l.data, l.posted_at, l.first_seen, l.total, l.seeded,
       coalesce(case when md.n >= 4 then md.m end, mk.m) as median,
       case when md.n >= 4 then md.n else mk.n end as median_n,
       case when md.n >= 4 then 'district' else 'kind' end as median_scope
@@ -162,7 +162,7 @@ async function listing(body: any, user: User | null) {
     ? await sql`select id, remind_at, note, sent from flatbot.reminders where chat_id = ${user.id} and key = ${key} order by remind_at`
     : [];
   return {
-    item: { ...l.data, key, total: S.total(l.data), posted_at: l.posted_at, first_seen: l.first_seen },
+    item: { ...l.data, key, total: S.total(l.data), posted_at: l.posted_at, first_seen: l.first_seen, seeded: l.seeded },
     median: l.median ? Math.round(l.median) : null,
     medianN: Number(l.median_n ?? 0),
     medianScope: l.median_scope,

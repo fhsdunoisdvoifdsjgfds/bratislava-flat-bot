@@ -942,7 +942,7 @@
           <a class="btn sm ghost" href="mailto:${esc(m)}?subject=${encodeURIComponent(it.title)}&body=${encodeURIComponent(TEMPLATE(it.title))}">${ic("mail")}Написать</a></div>`).join("")}
       ${!(it.phones ?? []).length ? `<div class="contact"><div class="who"><small>${it.source === "bazos" ? "Bazoš показывает номер только после входа — откройте объявление на сайте и нажмите «zobraziť číslo»." : it.source === "bezrealitky" ? "На Bezrealitky написать владельцу можно через сайт после входа." : "Телефон в тексте не указан — свяжитесь через сайт."}</small></div></div>` : ""}
       <div style="display:grid;gap:8px;margin-top:8px">
-        <button class="btn sm plain block" data-template>${ic("msg")}Скопировать сообщение продавцу (SK)</button>
+        <button class="btn sm plain block" data-template>${ic("msg")}Текст продавцу на словацком</button>
         <button class="btn sm plain block" data-site>${ic("ext")}Открыть объявление на сайте</button>
       </div>`;
 
@@ -988,7 +988,7 @@
       <div class="actionbar">
         <button class="btn sq ${fav ? "" : "plain"}" data-fav="${esc(key)}" aria-label="В избранное">${ic("heart", fav)}</button>
         <button class="btn plain" data-remind>${ic("clock")}Напомнить</button>
-        ${(it.phones ?? []).length ? `<button class="btn good" data-call="${esc(it.phones[0])}">${ic("phone")}Позвонить</button>` : `<button class="btn" data-site>${ic("ext")}Открыть сайт</button>`}
+        ${(it.phones ?? []).length ? `<button class="btn good" data-call="${esc(it.phones[0])}">${ic("phone")}Позвонить</button>` : `<button class="btn" data-site>${ic("ext")}На сайт</button>`}
       </div>`;
 
     const gal = $("#gal", page);
