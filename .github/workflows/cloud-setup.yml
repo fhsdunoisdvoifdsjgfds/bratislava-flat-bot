@@ -1,0 +1,20 @@
+name: cloud-setup
+
+# Одноразовый запуск: передаёт токен бота из секретов GitHub в облачную функцию
+# Supabase, подключает вебхук Telegram и переносит подписчиков.
+# Дальше бот работает в Supabase сам (pg_cron каждые 10 минут), GitHub больше не нужен.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: connect bot to cloud
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          curl -sS --fail-with-body --max-time 170 -X POST \
+            "https://nnkhlnzjkwtcjvzyubzc.supabase.co/functions/v1/flat-bot?action=setup" \
+            -H "x-bot-token: $TELEGRAM_BOT_TOKEN"
