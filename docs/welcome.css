@@ -1,0 +1,187 @@
+/* ------------------------------------------------------------------ приветствие + выбор языка
+   Полноэкранный оверлей (welcome.js). Все классы с префиксом fbw-.
+   Опирается на токены app.css: --bg, --surface, --text, --hint, --line, --accent… */
+html.fbw-lock, html.fbw-lock body { overflow: hidden; }
+
+.fbw {
+  position: fixed; inset: 0; z-index: 100;
+  background: var(--bg, #f1f2f6); color: var(--text, #0f1422);
+  animation: fbw-in .45s var(--ease, ease) both;
+  -webkit-font-smoothing: antialiased;
+}
+.fbw *, .fbw *::before, .fbw *::after { box-sizing: border-box; }
+.fbw.fbw-out { animation: fbw-leave .38s cubic-bezier(.4, 0, .2, 1) both; pointer-events: none; }
+@keyframes fbw-in { from { opacity: 0; } }
+@keyframes fbw-leave { to { opacity: 0; transform: translateY(-14px) scale(.985); } }
+
+.fbw-wrap {
+  height: 100%; max-width: 560px; margin: 0 auto;
+  display: flex; flex-direction: column; background: var(--bg, #f1f2f6);
+}
+.fbw-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+
+/* ------------------------------------------------------------------ hero */
+.fbw-hero {
+  position: relative; overflow: hidden; color: #fff; isolation: isolate;
+  padding: calc(16px + env(safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)) 22px 46px;
+  background: radial-gradient(130% 140% at 0% 0%, #6a5cff 0%, var(--accent, #2f6bff) 45%, #13b5a0 120%);
+}
+.fbw-blob { position: absolute; border-radius: 50%; background: rgba(255, 255, 255, .12); z-index: -1; }
+.fbw-blob1 { width: 240px; height: 240px; right: -80px; top: -100px; }
+.fbw-blob2 { width: 130px; height: 130px; left: -46px; bottom: -40px; background: rgba(255, 255, 255, .09); }
+
+.fbw-brand {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  padding: 6px 12px 6px 8px; border-radius: 999px;
+  background: rgba(255, 255, 255, .16); box-shadow: 0 0 0 1px rgba(255, 255, 255, .22) inset;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  font-size: 13px; font-weight: 650; letter-spacing: .01em; white-space: nowrap;
+}
+.fbw-brand .fbw-t { overflow: hidden; text-overflow: ellipsis; }
+.fbw-brand-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: none; background: #5dffb5;
+  box-shadow: 0 0 0 3px rgba(93, 255, 181, .28); animation: fbw-live 2s ease-in-out infinite;
+}
+@keyframes fbw-live { 50% { box-shadow: 0 0 0 6px rgba(93, 255, 181, 0); } }
+
+/* иллюстрация: плитка с домиком, «радар» и летающие эмодзи */
+.fbw-art { position: relative; height: 116px; margin: 10px auto 8px; width: 220px; }
+.fbw-tile {
+  position: absolute; left: 50%; top: 50%; width: 84px; height: 84px; margin: -42px 0 0 -42px;
+  border-radius: 26px; display: grid; place-items: center;
+  background: linear-gradient(160deg, rgba(255, 255, 255, .38), rgba(255, 255, 255, .14));
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .35) inset, 0 14px 30px rgba(10, 20, 60, .25);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  animation: fbw-bob 4.2s ease-in-out infinite;
+}
+.fbw-house { font-size: 46px; line-height: 1; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, .18)); }
+.fbw-ring {
+  position: absolute; left: 50%; top: 50%; width: 84px; height: 84px; margin: -42px 0 0 -42px;
+  border-radius: 30px; border: 2px solid rgba(255, 255, 255, .5);
+  animation: fbw-radar 2.8s cubic-bezier(.2, .6, .3, 1) infinite;
+}
+.fbw-ring2 { animation-delay: 1.4s; }
+@keyframes fbw-radar { from { transform: scale(1); opacity: .7; } to { transform: scale(2.1); opacity: 0; } }
+@keyframes fbw-bob { 50% { transform: translateY(-6px); } }
+
+.fbw-fly {
+  position: absolute; font-size: 28px; line-height: 1;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .2));
+  animation: fbw-float 4s ease-in-out infinite;
+}
+.fbw-fly-key { left: 6px; top: 50px; font-size: 30px; animation-delay: -.6s; --r: -14deg; }
+.fbw-fly-pin { right: 14px; top: 0; animation-delay: -2.1s; --r: 10deg; }
+.fbw-fly-bell { right: 0; bottom: 4px; font-size: 24px; animation-delay: -1.2s; --r: -8deg; }
+@keyframes fbw-float {
+  0%, 100% { transform: translateY(0) rotate(var(--r, 0deg)); }
+  50% { transform: translateY(-9px) rotate(calc(var(--r, 0deg) * -1)); }
+}
+.fbw-spark { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #fff; opacity: .8; animation: fbw-twinkle 2.4s ease-in-out infinite; }
+.fbw-spark1 { left: 40px; top: 14px; }
+.fbw-spark2 { right: 52px; bottom: 12px; width: 4px; height: 4px; animation-delay: -.8s; }
+.fbw-spark3 { left: 26px; bottom: 6px; width: 5px; height: 5px; animation-delay: -1.6s; }
+@keyframes fbw-twinkle { 50% { opacity: .15; transform: scale(.5); } }
+
+.fbw-title {
+  margin: 0; font-size: 26px; line-height: 1.16; font-weight: 780; letter-spacing: -.022em;
+  text-wrap: balance; text-shadow: 0 2px 14px rgba(10, 20, 60, .18);
+}
+.fbw-sub { margin: 10px 0 0; font-size: 15px; line-height: 1.42; opacity: .9; text-wrap: pretty; }
+
+/* смена языка: текст мягко проявляется */
+.fbw-swap { animation: fbw-swap .32s var(--ease, ease) both; }
+@keyframes fbw-swap { from { opacity: 0; transform: translateY(4px); filter: blur(2px); } }
+
+/* ------------------------------------------------------------------ лист с языками */
+.fbw-sheet {
+  position: relative; margin-top: -26px; padding: 20px 16px 12px;
+  background: var(--bg, #f1f2f6); border-radius: 26px 26px 0 0;
+}
+.fbw-label {
+  font-size: 13px; font-weight: 650; color: var(--hint, #8a90a2);
+  text-transform: uppercase; letter-spacing: .05em; margin: 0 4px 10px;
+}
+.fbw-list { display: flex; flex-direction: column; gap: 8px; }
+
+.fbw-opt {
+  -webkit-appearance: none; appearance: none; border: 0; margin: 0; font: inherit; color: var(--text, #0f1422); cursor: pointer;
+  width: 100%; min-height: 58px; display: flex; align-items: center; gap: 14px; text-align: left;
+  padding: 9px 14px; border-radius: 18px;
+  background: var(--surface, #fff);
+  box-shadow: 0 0 0 1.5px transparent inset, var(--shadow, 0 1px 2px rgba(10, 20, 40, .06));
+  transition: transform .18s var(--ease, ease), box-shadow .22s ease, background-color .22s ease;
+  animation: fbw-rise .5s var(--ease, ease) both; animation-delay: calc(.08s + var(--i, 0) * .045s);
+  -webkit-tap-highlight-color: transparent;
+}
+@keyframes fbw-rise { from { opacity: 0; transform: translateY(10px); } }
+.fbw-opt:active { transform: scale(.975); }
+.fbw-opt:focus-visible { outline: 2px solid var(--accent, #2f6bff); outline-offset: 2px; }
+.fbw-opt.on {
+  background: color-mix(in srgb, var(--accent, #2f6bff) 9%, var(--surface, #fff));
+  box-shadow: 0 0 0 2px var(--accent, #2f6bff) inset, 0 6px 18px color-mix(in srgb, var(--accent, #2f6bff) 18%, transparent);
+}
+
+.fbw-flag {
+  flex: none; display: block; width: 36px; height: 26px; border-radius: 5px;
+  box-shadow: 0 2px 6px rgba(10, 20, 40, .14);
+  transition: transform .25s var(--ease, ease);
+}
+.fbw-flag svg { display: block; width: 100%; height: 100%; }
+.fbw-opt.on .fbw-flag { transform: scale(1.08); }
+
+.fbw-names { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fbw-names b { font-size: 16.5px; font-weight: 650; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fbw-names small { font-size: 13px; color: var(--hint, #8a90a2); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.fbw-ck {
+  flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  box-shadow: 0 0 0 1.5px var(--line, rgba(0, 0, 0, .1)) inset; color: transparent;
+  transition: background-color .2s ease, box-shadow .2s ease, color .2s ease;
+}
+.fbw-ck svg { width: 15px; height: 15px; transform: scale(.4); opacity: 0; transition: transform .28s cubic-bezier(.3, 1.6, .5, 1), opacity .15s; }
+.fbw-opt.on .fbw-ck { background: var(--accent, #2f6bff); color: var(--accent-text, #fff); box-shadow: 0 3px 10px color-mix(in srgb, var(--accent, #2f6bff) 40%, transparent); }
+.fbw-opt.on .fbw-ck svg { transform: scale(1); opacity: 1; }
+
+/* ------------------------------------------------------------------ кнопка */
+.fbw-foot {
+  flex: none; padding: 10px 16px calc(12px + var(--safe-b, env(safe-area-inset-bottom, 0px)));
+  background: var(--bg, #f1f2f6);
+  box-shadow: 0 -1px 0 var(--line, rgba(0, 0, 0, .08));
+}
+.fbw-cta {
+  -webkit-appearance: none; appearance: none; border: 0; margin: 0; font: inherit; cursor: pointer;
+  position: relative; overflow: hidden; width: 100%; height: 54px; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  font-size: 17px; font-weight: 700; letter-spacing: .005em;
+  color: var(--accent-text, #fff); background: var(--accent, #2f6bff);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--accent, #2f6bff) 38%, transparent);
+  transition: transform .15s var(--ease, ease), box-shadow .2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.fbw-cta::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-120%);
+  background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, .28) 50%, transparent 70%);
+  animation: fbw-sheen 3.6s ease-in-out 1.2s infinite;
+}
+@keyframes fbw-sheen { 0% { transform: translateX(-120%); } 35%, 100% { transform: translateX(120%); } }
+.fbw-cta:active { transform: scale(.975); box-shadow: 0 4px 12px color-mix(in srgb, var(--accent, #2f6bff) 30%, transparent); }
+.fbw-cta:focus-visible { outline: 2px solid var(--accent, #2f6bff); outline-offset: 3px; }
+.fbw-cta svg { width: 20px; height: 20px; flex: none; animation: fbw-nudge 1.8s ease-in-out infinite; }
+@keyframes fbw-nudge { 50% { transform: translateX(3px); } }
+
+/* невысокие экраны: компактнее hero */
+@media (max-height: 740px) {
+  .fbw-hero { padding-bottom: 40px; }
+  .fbw-art { height: 84px; margin: 4px auto 4px; }
+  .fbw-art > * { scale: .74; }
+  .fbw-tile, .fbw-ring { transform-origin: center; }
+  .fbw-title { font-size: 22px; }
+  .fbw-sub { font-size: 14px; margin-top: 6px; }
+  .fbw-sheet { padding-top: 18px; }
+  .fbw-label { margin-bottom: 8px; }
+  .fbw-opt { min-height: 56px; padding: 8px 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fbw, .fbw *, .fbw *::before, .fbw *::after { animation: none !important; transition-duration: .01ms !important; }
+}

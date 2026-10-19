@@ -1,0 +1,67 @@
+/* Превью уведомления: «вот так объявление прилетит вам в чат». Классы с префиксом fbn-. */
+.fbn { display: grid; gap: 14px; }
+.fbn-head { display: flex; gap: 12px; align-items: flex-start; }
+.fbn-bolt {
+  width: 44px; height: 44px; border-radius: 14px; flex: none; display: grid; place-items: center; font-size: 24px;
+  background: linear-gradient(135deg, #ffb020, #ff6a3d); box-shadow: 0 6px 18px rgba(255, 120, 40, .35);
+}
+.fbn-head > div b { display: block; font-size: 18px; line-height: 1.2; letter-spacing: -.01em; }
+.fbn-head > div span { display: block; color: var(--hint); font-size: 13.5px; margin-top: 3px; line-height: 1.35; }
+
+/* окно чата Telegram */
+.fbn-chat { border-radius: 20px; overflow: hidden; box-shadow: var(--shadow), 0 0 0 1px var(--line); background: var(--surface); }
+.fbn-bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.fbn-ava { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; background: linear-gradient(135deg, #6a5cff, var(--accent) 55%, #13b5a0); flex: none; }
+.fbn-bar b { display: block; font-size: 14.5px; }
+.fbn-bar small { color: var(--accent); font-size: 12px; }
+.fbn-body {
+  padding: 14px 12px 12px; min-height: 120px; position: relative;
+  background:
+    radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--accent) 10%, transparent) 0 18%, transparent 19%),
+    radial-gradient(circle at 80% 70%, color-mix(in srgb, #13b5a0 12%, transparent) 0 14%, transparent 15%),
+    color-mix(in srgb, var(--accent) 6%, var(--bg));
+  background-size: 120px 120px, 160px 160px, auto;
+}
+.fbn-typing { display: inline-flex; gap: 4px; padding: 10px 12px; border-radius: 16px 16px 16px 4px; background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+.fbn-typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--hint); animation: fbn-dot 1s infinite ease-in-out; }
+.fbn-typing i:nth-child(2) { animation-delay: .15s; }
+.fbn-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes fbn-dot { 0%, 80%, 100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+
+.fbn-msg { max-width: 92%; animation: fbn-pop .45s cubic-bezier(.2, .9, .3, 1.2) both; }
+@keyframes fbn-pop { from { opacity: 0; transform: translateY(12px) scale(.96); } }
+.fbn-bubble { background: var(--surface); border-radius: 16px 16px 16px 4px; overflow: hidden; box-shadow: 0 1px 2px rgba(0, 0, 0, .1); }
+.fbn-photo { height: 116px; position: relative; overflow: hidden; background: linear-gradient(160deg, #f6d7b0, #e9b98a 45%, #b98a62); }
+.fbn-photo .win { position: absolute; right: 16px; top: 14px; width: 74px; height: 62px; border-radius: 6px; background: linear-gradient(#bfe3ff, #8fc8f5); box-shadow: inset 0 0 0 4px #fff8; }
+.fbn-photo .win::before, .fbn-photo .win::after { content: ""; position: absolute; background: #fff9; }
+.fbn-photo .win::before { left: 50%; top: 0; bottom: 0; width: 3px; }
+.fbn-photo .win::after { top: 50%; left: 0; right: 0; height: 3px; }
+.fbn-photo .sofa { position: absolute; left: 18px; bottom: 16px; font-size: 46px; }
+.fbn-photo .plant { position: absolute; left: 92px; bottom: 18px; font-size: 30px; }
+.fbn-photo .new { position: absolute; left: 10px; top: 10px; background: var(--good); color: #fff; font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 7px; letter-spacing: .03em; }
+.fbn-text { padding: 9px 12px 6px; font-size: 13.5px; line-height: 1.45; }
+.fbn-text b { font-weight: 700; }
+.fbn-text .t { font-weight: 700; font-size: 14px; margin-bottom: 2px; }
+.fbn-time { text-align: right; font-size: 11px; color: var(--hint); padding: 0 10px 6px; }
+.fbn-kb { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 4px; }
+.fbn-kb span {
+  text-align: center; font-size: 12.5px; font-weight: 600; padding: 8px 4px; border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(4px);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08); color: var(--text);
+}
+
+/* таймлайн: опубликовано → у вас → у остальных */
+.fbn-line { display: grid; gap: 0; padding: 4px 2px 0; }
+.fbn-step { display: grid; grid-template-columns: 52px 18px 1fr; gap: 8px; align-items: start; position: relative; padding-bottom: 12px; }
+.fbn-step:last-child { padding-bottom: 0; }
+.fbn-step .tm { font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; padding-top: 1px; }
+.fbn-step .dot { width: 12px; height: 12px; border-radius: 50%; margin: 4px auto 0; background: var(--line); position: relative; z-index: 1; }
+.fbn-step:not(:last-child) .dot::after { content: ""; position: absolute; left: 5px; top: 12px; width: 2px; height: calc(100% + 26px); background: var(--line); }
+.fbn-step .tx { font-size: 13.5px; line-height: 1.35; color: var(--hint); }
+.fbn-step.me .dot { background: var(--good); box-shadow: 0 0 0 4px color-mix(in srgb, var(--good) 22%, transparent); }
+.fbn-step.me .tx { color: var(--text); font-weight: 650; }
+.fbn-step.me .tm { color: var(--good); }
+
+@media (prefers-reduced-motion: reduce) {
+  .fbn-msg, .fbn-typing i { animation: none; }
+}
