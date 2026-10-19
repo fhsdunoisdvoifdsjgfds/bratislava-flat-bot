@@ -548,7 +548,7 @@ export async function bezrealitkyDetail(l: Listing) {
   l.text = a.descriptionByLocale || a.description || l.text;
   l.deposit = a.deposit || l.deposit;
   if (a.availableFrom) l.availableFrom = bratislavaDate(new Date(a.availableFrom * 1000));
-  if (a.etage != null) l.floor = a.totalFloors ? `${a.etage} из ${a.totalFloors}` : String(a.etage);
+  if (a.etage != null) l.floor = a.totalFloors ? `${a.etage}/${a.totalFloors}` : String(a.etage);
   const imgs = (a.publicImages ?? []).map((i: any) => i?.url ?? pick(i ?? {}, "url")).filter((u: unknown) => typeof u === "string");
   if (imgs.length) l.images = imgs;
   if (a.petFriendly) l.tags.push("можно с животными");

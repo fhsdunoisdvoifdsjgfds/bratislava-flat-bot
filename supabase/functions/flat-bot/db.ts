@@ -1,6 +1,8 @@
 import postgres from "npm:postgres@3.4.5";
 import * as S from "./sources.ts";
 import type { Kind, Listing } from "./sources.ts";
+import { langOr } from "./i18n.ts";
+import type { Lang } from "./i18n.ts";
 
 export const sql = postgres(Deno.env.get("SUPABASE_DB_URL")!, { prepare: false, max: 3 });
 
@@ -19,7 +21,8 @@ export type Settings = {
   minTotal: number;
   maxTotal: number;
   agency: "any" | "private" | "agency";
-  lang?: "ru" | "en" | "sk" | "uk" | "be";
+  lang?: Lang; // язык сообщений бота (и приложения)
+  langAuto?: boolean; // язык определён по Telegram language_code, пользователь его не выбирал
   // где искать: объявление подходит, если совпал край ИЛИ город ИЛИ район Братиславы; всё пусто — вся Словакия
   regions: string[];
   cities: string[];
@@ -155,6 +158,12 @@ export async function logEvent(chat: number, type: string, data: Record<string, 
   } catch (e) {
     console.error("logEvent", type, e);
   }
+}
+
+// язык сообщений для чата: settings.lang, иначе английский
+export async function langOf(chat: number): Promise<Lang> {
+  const [r] = await sql`select settings->>'lang' as lang from flatbot.subscribers where chat_id = ${chat}`;
+  return langOr(r?.lang);
 }
 
 export async function isAdmin(chat: number) {

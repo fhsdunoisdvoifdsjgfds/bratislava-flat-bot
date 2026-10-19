@@ -15,6 +15,8 @@ import * as G from "./geo.ts";
 import * as S from "./sources.ts";
 import type { Listing } from "./sources.ts";
 import { APP_URL, esc, say, SELF_URL, sendDigest, sendListing, setToken, sleep, tg, token } from "./tg.ts";
+import { asLang, fmtDateTime, L, langFromCode, langOr } from "./i18n.ts";
+import type { Lang } from "./i18n.ts";
 import { accessFilter, accessOf, cfg as stripeCfg, handleWebhook, nagTick, payLink, priceInfo, paywallText, setup as stripeSetup } from "./stripe.ts";
 
 
@@ -112,7 +114,7 @@ async function check() {
           continue;
         }
         try {
-          await sendListing(chat, l);
+          await sendListing(chat, l, langOr(s.lang));
           sent++;
           await logEvent(chat, "notified", { key: S.key(l) });
         } catch (e) {
@@ -153,15 +155,17 @@ async function tick() {
 
   // 1) напоминания
   const due = await sql`
-    select r.id, r.chat_id, r.note, l.data
+    select r.id, r.chat_id, r.note, l.data, s.settings->>'lang' as lang
     from flatbot.reminders r left join flatbot.listings l on l.key = r.key
+    left join flatbot.subscribers s on s.chat_id = r.chat_id
     where not r.sent and r.remind_at <= now() order by r.remind_at limit 30`;
   for (const r of due) {
     await sql`update flatbot.reminders set sent = true where id = ${r.id}`;
     const note = r.note ? `\n📝 ${esc(r.note)}` : "";
+    const t = L(langOr(r.lang));
     try {
-      if (r.data) await sendListing(Number(r.chat_id), r.data, `⏰ <b>Напоминание</b>${note}\n\n`);
-      else await say(Number(r.chat_id), `⏰ <b>Напоминание</b>${note || "\nВы просили напомнить."}`);
+      if (r.data) await sendListing(Number(r.chat_id), r.data, langOr(r.lang), `${t("reminder.title")}${note}\n\n`);
+      else await say(Number(r.chat_id), `${t("reminder.title")}${note || "\n" + t("reminder.default")}`);
       out.reminders++;
       await logEvent(Number(r.chat_id), "reminder_sent", { id: Number(r.id) });
     } catch (e) {
@@ -182,6 +186,7 @@ async function tick() {
     }
     const s = settingsOf(w.settings);
     const chat = Number(w.chat_id);
+    const lang = langOr(s.lang);
     const mode = s.notify.mode;
     const flush =
       mode === "off" ? "drop"
@@ -195,12 +200,12 @@ async function tick() {
     if (flush === "drop" || !items.length) continue;
     try {
       if (flush === "instant" && items.length <= 4) {
-        for (const i of items) await sendListing(chat, i.data);
+        for (const i of items) await sendListing(chat, i.data, lang);
       } else {
-        const title = flush === "digest"
-          ? `📬 <b>Подборка: ${items.length} новых объявлений</b>`
-          : `🌅 <b>Пока были тихие часы — ${items.length} новых объявлений</b>`;
-        await sendDigest(chat, items.map((i: any) => i.data), title);
+        const t = L(lang);
+        const what = t("n.newListings", { n: items.length });
+        const title = flush === "digest" ? t("digest.title", { what }) : t("digest.quiet", { what });
+        await sendDigest(chat, items.map((i: any) => i.data), title, lang);
       }
       await sql`update flatbot.subscribers set last_digest_at = now() where chat_id = ${chat}`;
       out.digests++;
@@ -237,9 +242,10 @@ async function tick() {
 }
 
 // ---------------------------------------------------------------- команды бота
-const appButton = (text = "🏠 Открыть приложение") => ({ inline_keyboard: [[{ text, web_app: { url: APP_URL } }]] });
+const appButton = (lang: Lang, text = L(lang)("btn.openApp")) => ({ inline_keyboard: [[{ text, web_app: { url: APP_URL } }]] });
 
-async function sendToday(chat_id: number, limit: number) {
+async function sendToday(chat_id: number, limit: number, lang: Lang) {
+  const t = L(lang);
   const [sub] = await sql`select settings from flatbot.subscribers where chat_id = ${chat_id}`;
   const s = settingsOf(sub?.settings);
   const rows = await sql`
@@ -247,24 +253,24 @@ async function sendToday(chat_id: number, limit: number) {
     where kind is not null and posted_at > now() - interval '24 hours' order by posted_at desc limit 200`;
   const list = rows.map((r: any) => r.data as Listing).filter((l) => matches(l, s));
   if (!list.length) {
-    await say(chat_id, "За последние сутки подходящих объявлений пока нет. Как только появятся — пришлю.", {
-      reply_markup: appButton("⚙️ Изменить фильтры"),
+    await say(chat_id, t("today.none"), {
+      reply_markup: appButton(lang, t("btn.editFilters")),
     });
     return;
   }
-  await say(chat_id, `📅 За последние 24 часа: <b>${list.length}</b> подходящих` +
-    (list.length > limit ? `. Показываю ${limit} самых свежих, остальные — в приложении.` : ""));
+  await say(chat_id, t("today.count", { n: list.length }) +
+    (list.length > limit ? t("today.more", { limit }) : ""));
   for (const l of list.slice(0, limit).reverse()) {
-    await sendListing(chat_id, l);
+    await sendListing(chat_id, l, lang);
     await sleep(300);
   }
 }
 
-const HELP =
-  "Я ищу квартиры и комнаты по всей Словакии на bazos.sk, nehnutelnosti.sk (+reality.sk, byty.sk), " +
-  "topreality.sk и bezrealitky.sk и присылаю новые объявления в течение 10 минут.\n\n" +
-  "В приложении: выбор городов и районов, бюджет, агентство или частник, карта, избранное, напоминания и настройка уведомлений.\n\n" +
-  "/today — объявления за сутки\n/app — открыть приложение\n/status — последняя проверка\n/stop — отписаться";
+// /status: ключи статистики хранятся как есть («bazos (квартиры)», «ошибка: …») — переводим при показе
+const statusLine = (t: ReturnType<typeof L>, k: string, v: unknown) =>
+  `• ${k.replace("(квартиры)", `(${t("status.flats")})`).replace("(комнаты)", `(${t("status.rooms")})`)}: ${
+    String(v).replace(/^ошибка:/, `${t("status.error")}:`)
+  }`;
 
 async function handleUpdate(u: any) {
   if (u.my_chat_member?.new_chat_member?.status === "kicked") {
@@ -278,6 +284,20 @@ async function handleUpdate(u: any) {
   const name = msg.chat.title ?? [msg.chat.first_name, msg.chat.last_name].filter(Boolean).join(" ");
   const cmd = String(msg.text ?? "").trim().split(/[\s@]/)[0].toLowerCase();
 
+  // язык: выбранный в настройках → язык Telegram → английский
+  const [prev] = await sql`select active, settings->>'lang' as lang from flatbot.subscribers where chat_id = ${chat_id}`;
+  const tgLang = langFromCode(msg.from?.language_code);
+  const lang: Lang = asLang(prev?.lang) ?? tgLang ?? "en";
+  const t = L(lang);
+  // языка в настройках ещё нет — запоминаем язык Telegram, чтобы рассылки шли на нём же
+  // (langAuto: пользователь его не выбирал — приложение всё равно покажет выбор языка)
+  const rememberLang = () =>
+    !asLang(prev?.lang) && tgLang
+      ? sql`update flatbot.subscribers
+            set settings = coalesce(settings, '{}'::jsonb) || jsonb_build_object('lang', ${tgLang}::text, 'langAuto', true)
+            where chat_id = ${chat_id} and coalesce(settings->>'lang', '') = ''`
+      : null;
+
   // «/admin КОД» — одноразовая выдача прав админа владельцу бота
   if (cmd === "/admin") {
     const code = String(msg.text ?? "").trim().split(/\s+/)[1] ?? "";
@@ -287,22 +307,23 @@ async function handleUpdate(u: any) {
       await setMeta("admins", [...new Set([...admins.map(Number), chat_id])]);
       await setMeta("admin_code", null);
       await logEvent(chat_id, "admin_granted");
-      await say(chat_id, "🛡 <b>Готово, вы админ.</b> Админ-панель — в приложении: Настройки → «Админ-панель».", { reply_markup: appButton() });
+      await say(chat_id, "🛡 <b>Готово, вы админ.</b> Админ-панель — в приложении: Настройки → «Админ-панель».", { reply_markup: appButton(lang) });
     } else {
-      await say(chat_id, "Неизвестная команда.");
+      await say(chat_id, t("unknownCommand"));
     }
     return;
   }
   if (cmd === "/stop") {
     await logEvent(chat_id, "stop");
     await sql`update flatbot.subscribers set active = false where chat_id = ${chat_id}`;
-    await say(chat_id, "Отписал. Чтобы снова получать объявления — /start");
+    await rememberLang();
+    await say(chat_id, t("stop.done"));
     return;
   }
   // любой, кто написал боту, становится подписчиком
-  const [prev] = await sql`select active from flatbot.subscribers where chat_id = ${chat_id}`;
   await sql`insert into flatbot.subscribers (chat_id, name, username, active) values (${chat_id}, ${name}, ${msg.chat.username ?? null}, true)
             on conflict (chat_id) do update set active = true, name = excluded.name, username = excluded.username`;
+  await rememberLang();
   const isNew = !prev || !prev.active;
   await logEvent(chat_id, cmd.startsWith("/") ? "command" : "message", {
     cmd: cmd.startsWith("/") ? cmd : undefined, isNew: isNew || undefined,
@@ -312,74 +333,68 @@ async function handleUpdate(u: any) {
   const acc = await accessOf(chat_id);
   const payButton = async (text: string) => ({ inline_keyboard: [[{ text, url: await payLink(chat_id) }]] });
   if (cmd === "/pay" || cmd === "/subscribe" || (cmd === "/start" && String(msg.text).includes("pay_cancel"))) {
-    if (!acc.enabled) await say(chat_id, "Сейчас бот бесплатный — ничего оплачивать не нужно.");
-    else if (acc.ok && acc.reason !== "trialing" && acc.reason !== "active") await say(chat_id, "У вас бесплатный доступ — оплачивать ничего не нужно 🙂");
+    if (!acc.enabled) await say(chat_id, t("pay.free"));
+    else if (acc.ok && acc.reason !== "trialing" && acc.reason !== "active") await say(chat_id, t("pay.comp"));
     else {
       const p = await priceInfo().catch(() => null);
       await say(chat_id, acc.ok
-        ? "Управление подпиской — по кнопке ниже."
-        : `💳 <b>Подписка</b>: ${acc.trialAvailable ? "первые 7 дней бесплатно, затем " : ""}${paywallText(p)}. Отменить можно в любой момент.`,
-        { reply_markup: await payButton(acc.ok ? "⚙️ Управлять подпиской" : acc.trialAvailable ? "🎁 Начать 7 дней бесплатно" : "💳 Оформить подписку") });
+        ? t("pay.manage")
+        : t("pay.offer", { trial: acc.trialAvailable ? t("pay.trialPrefix") : "", price: paywallText(p, lang) }),
+        { reply_markup: await payButton(acc.ok ? t("btn.manageSub") : acc.trialAvailable ? t("btn.startTrial") : t("btn.subscribe")) });
     }
     return;
   }
   if (cmd === "/start" && String(msg.text).includes("paid")) {
-    await say(chat_id, acc.ok ? "✅ Готово! Подписка активна — новые объявления будут приходить сюда." : "⏳ Ждём подтверждения оплаты от Stripe — обычно это несколько секунд. Как только придёт, напишу.", { reply_markup: appButton() });
+    await say(chat_id, acc.ok ? t("paid.ok") : t("paid.wait"), { reply_markup: appButton(lang) });
     return;
   }
   if (cmd === "/status") {
     const lc = await meta("last_check");
-    const lines = lc ? Object.entries(lc.stats).map(([k, v]) => `• ${k}: ${v}`).join("\n") : "ещё не было";
-    const at = lc ? new Date(lc.at).toLocaleString("ru-RU", { timeZone: "Europe/Bratislava" }) : "";
-    await say(chat_id, `🕒 Последняя проверка: ${at}\n${esc(lines)}`);
+    const lines = lc ? Object.entries(lc.stats).map(([k, v]) => statusLine(t, k, v)).join("\n") : t("status.never");
+    const at = lc ? fmtDateTime(lang, new Date(lc.at)) : "";
+    await say(chat_id, t("status.title", { at, lines: esc(lines) }));
   } else if (isNew || cmd === "/start") {
     const [me] = await sql`select onboarded from flatbot.subscribers where chat_id = ${chat_id}`;
     if (!me?.onboarded) {
       // сначала — настроить фильтр, иначе пришлось бы слать объявления со всей Словакии
-      await say(
-        chat_id,
-        "👋 <b>Привет! Я помогаю найти жильё в Словакии быстрее других.</b>\n\n" +
-          "Каждые 10 минут проверяю bazos, nehnutelnosti, topreality и bezrealitky и присылаю сюда новые " +
-          "объявления — с ценой, телефоном и кнопкой звонка. Хорошие варианты разбирают за пару часов, " +
-          "поэтому важно узнавать первым.\n\n" +
-          "<b>Нажмите кнопку ниже</b>, выберите город, бюджет и тип жилья — это займёт минуту. " +
-          "После этого уведомления начнут приходить сюда.",
-        { reply_markup: appButton("🚀 Настроить поиск") },
-      );
+      await say(chat_id, t("start.welcome"), { reply_markup: appButton(lang, t("btn.setup")) });
     } else if (!acc.ok) {
-      await say(chat_id, "👋 <b>С возвращением!</b> Чтобы снова получать новые объявления, оформите подписку.", {
-        reply_markup: await payButton(acc.trialAvailable ? "🎁 Начать 7 дней бесплатно" : "💳 Оформить подписку"),
+      await say(chat_id, t("start.backPay"), {
+        reply_markup: await payButton(acc.trialAvailable ? t("btn.startTrial") : t("btn.subscribe")),
       });
     } else {
-      await say(chat_id, "👋 <b>С возвращением!</b> " + HELP, { reply_markup: appButton() });
-      await sendToday(chat_id, 8);
+      await say(chat_id, t("start.back") + " " + t("help"), { reply_markup: appButton(lang) });
+      await sendToday(chat_id, 8, lang);
     }
   } else if (cmd === "/today") {
-    if (!acc.ok) await say(chat_id, "🔒 Новые объявления доступны по подписке.", { reply_markup: await payButton(acc.trialAvailable ? "🎁 7 дней бесплатно" : "💳 Оформить подписку") });
-    else await sendToday(chat_id, 15);
+    if (!acc.ok) await say(chat_id, t("today.locked"), { reply_markup: await payButton(acc.trialAvailable ? t("btn.trialShort") : t("btn.subscribe")) });
+    else await sendToday(chat_id, 15, lang);
   } else {
-    await say(chat_id, HELP, { reply_markup: appButton() });
+    await say(chat_id, t("help"), { reply_markup: appButton(lang) });
   }
 }
 
+// команды и описание: по умолчанию (без language_code) — английский, плюс отдельно для ru/uk/be/sk (и cs → sk)
+const BOT_LANGS: [string | null, Lang][] = [[null, "en"], ["ru", "ru"], ["uk", "uk"], ["be", "be"], ["sk", "sk"], ["cs", "sk"]];
+
 async function configure() {
-  await tg("setChatMenuButton", { menu_button: { type: "web_app", text: "🏠 Квартиры", web_app: { url: APP_URL } } });
-  await tg("setMyCommands", {
-    commands: [
-      { command: "app", description: "Открыть приложение" },
-      { command: "today", description: "Объявления за сутки" },
-      { command: "status", description: "Последняя проверка сайтов" },
-      { command: "stop", description: "Отписаться" },
-    ],
-  });
-  await tg("setMyShortDescription", {
-    short_description: "Новые квартиры и комнаты по всей Словакии за 10 минут: 4 сайта, любые города, карта, напоминания.",
-  });
-  await tg("setMyDescription", {
-    description:
-      "Ищу аренду по всей Словакии — Bratislava, Košice, Žilina, Nitra и любые другие города — на bazos, nehnutelnosti, topreality и bezrealitky. " +
-      "Присылаю новые объявления в течение 10 минут, с телефоном и кнопкой звонка. Нажмите «Старт».",
-  });
+  // текст кнопки меню общий для всех языков — короткий и нейтральный
+  await tg("setChatMenuButton", { menu_button: { type: "web_app", text: "🏠 App", web_app: { url: APP_URL } } });
+  for (const [code, lang] of BOT_LANGS) {
+    const t = L(lang);
+    const lc = code ? { language_code: code } : {};
+    await tg("setMyCommands", {
+      commands: [
+        { command: "app", description: t("cmd.app") },
+        { command: "today", description: t("cmd.today") },
+        { command: "status", description: t("cmd.status") },
+        { command: "stop", description: t("cmd.stop") },
+      ],
+      ...lc,
+    });
+    await tg("setMyShortDescription", { short_description: t("bot.short"), ...lc });
+    await tg("setMyDescription", { description: t("bot.description"), ...lc });
+  }
   return { ok: true };
 }
 

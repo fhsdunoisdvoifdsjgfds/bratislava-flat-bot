@@ -1,4 +1,6 @@
 import { meta, sql } from "./db.ts";
+import { L, tr } from "./i18n.ts";
+import type { Lang } from "./i18n.ts";
 import * as S from "./sources.ts";
 import type { Listing } from "./sources.ts";
 
@@ -43,12 +45,9 @@ export const say = (chat_id: number, text: string, extra: Record<string, unknown
 export const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // ---------------------------------------------------------------- подписи
-export const KIND_LABEL: Record<string, string> = {
-  flat: "Квартира",
-  studio: "Студия / 1-комн.",
-  room: "Комната",
-  hostel: "Общежитие (ubytovňa)",
-};
+const KINDS = ["flat", "studio", "room", "hostel"] as const;
+export const kindLabel = (lang: Lang, k: string) =>
+  (KINDS as readonly string[]).includes(k) ? tr(lang, `kind.${k as (typeof KINDS)[number]}`) : null;
 export const SOURCE_LABEL: Record<string, string> = {
   bazos: "Bazoš",
   nehnutelnosti: "Nehnuteľnosti.sk",
@@ -60,64 +59,68 @@ export const districtName = (k: string | null) => S.DISTRICTS.find((d) => d[0] =
 export const placeName = (l: Pick<Listing, "cityName" | "district">) =>
   [l.cityName, districtName(l.district)].filter(Boolean).join(" · ") || null;
 
-export function priceLine(l: Listing): string {
+export function priceLine(l: Listing, lang: Lang): string {
   const t = S.total(l);
-  if (l.price == null) return "цена договорная";
-  if (l.utilities === "extra" && l.charges) return `<b>${t} €</b> = аренда ${l.price} + энергии ${l.charges}`;
-  if (l.utilities === "included") return `<b>${l.price} €</b> с энергиями ✓`;
-  if (l.utilities === "extra") return `<b>${l.price} €</b> + энергии (сумма не указана)`;
-  return `<b>${l.price} €</b> · про энергии уточнить`;
+  if (l.price == null) return tr(lang, "price.negotiable");
+  if (l.utilities === "extra" && l.charges) return tr(lang, "price.split", { total: t ?? l.price, price: l.price, charges: l.charges });
+  if (l.utilities === "included") return tr(lang, "price.included", { price: l.price });
+  if (l.utilities === "extra") return tr(lang, "price.extra", { price: l.price });
+  return tr(lang, "price.unknown", { price: l.price });
 }
 
 export const appLink = (key?: string) => APP_URL + (key ? `#l=${encodeURIComponent(key)}` : "");
 
-export function render(l: Listing) {
-  const lines = [`🏠 <b>${esc(l.title.slice(0, 180))}</b>`, "💶 " + priceLine(l)];
-  const where = [placeName(l), KIND_LABEL[l.kind], l.area ? `${l.area} м²` : null, l.floor ? `${l.floor} эт.` : null]
+export function render(l: Listing, lang: Lang) {
+  const t = L(lang);
+  const lines = [`🏠 <b>${esc(l.title.slice(0, 180))}</b>`, "💶 " + priceLine(l, lang)];
+  // этаж: у старых записей Bezrealitky — «3 из 8», теперь хранится «3/8»
+  const floor = l.floor ? String(l.floor).replace(/\s+из\s+/, "/") : null;
+  const where = [placeName(l), kindLabel(lang, l.kind), l.area ? t("area", { n: l.area }) : null, floor ? t("floor", { f: floor }) : null]
     .filter(Boolean).join(" · ");
   if (where) lines.push("📍 " + esc(where));
-  if (l.agency === true) lines.push(`🏢 Агентство${l.seller ? `: ${esc(l.seller.slice(0, 60))}` : ""}${l.commission ? " · комиссия" : ""}`);
-  else if (l.agency === false) lines.push("👤 Частник, без комиссии");
-  if (l.deposit) lines.push(`🔐 Залог ${l.deposit} €`);
+  if (l.agency === true) lines.push(`${t("agency")}${l.seller ? `: ${esc(l.seller.slice(0, 60))}` : ""}${l.commission ? t("agency.commission") : ""}`);
+  else if (l.agency === false) lines.push(t("agency.private"));
+  if (l.deposit) lines.push(t("deposit", { n: l.deposit }));
   if (l.phones.length) lines.push(`☎️ ${l.phones.map(S.prettyPhone).join(", ")}`);
   lines.push(`🌐 ${SOURCE_LABEL[l.source] ?? l.source}${l.published ? ` · ${l.published.split("-").reverse().slice(0, 2).join(".")}` : ""}`);
 
   const keyboard: any[][] = [];
   if (l.phones.length) {
     keyboard.push([
-      { text: "📞 Позвонить", url: `${SELF_URL}?action=call&n=${encodeURIComponent(l.phones[0])}` },
-      { text: "📋 Номер", copy_text: { text: l.phones[0] } },
+      { text: t("btn.call"), url: `${SELF_URL}?action=call&n=${encodeURIComponent(l.phones[0])}` },
+      { text: t("btn.copyNumber"), copy_text: { text: l.phones[0] } },
     ]);
   }
   keyboard.push([
-    { text: "📱 Подробнее", web_app: { url: appLink(S.key(l)) } },
-    { text: "🔗 На сайте", url: l.url },
+    { text: t("btn.details"), web_app: { url: appLink(S.key(l)) } },
+    { text: t("btn.onSite"), url: l.url },
   ]);
   return { text: lines.join("\n"), reply_markup: { inline_keyboard: keyboard } };
 }
 
-export async function sendListing(chat_id: number, l: Listing, prefix = "") {
-  const { text, reply_markup } = render(l);
+export async function sendListing(chat_id: number, l: Listing, lang: Lang, prefix = "") {
+  const { text, reply_markup } = render(l, lang);
   try {
     await say(chat_id, prefix + text, { reply_markup });
   } catch (e) {
     // если клиент не поддерживает какие-то кнопки — оставляем только ссылки
     if (/button|copy_text|web_app/i.test(String(e))) {
-      const plain = { inline_keyboard: [[{ text: "🔗 Открыть объявление", url: l.url }]] };
+      const plain = { inline_keyboard: [[{ text: tr(lang, "btn.openListing"), url: l.url }]] };
       await say(chat_id, prefix + text, { reply_markup: plain });
     } else throw e;
   }
 }
 
 // подборка: короткие строки + кнопка в приложение
-export async function sendDigest(chat_id: number, ls: Listing[], title: string) {
+export async function sendDigest(chat_id: number, ls: Listing[], title: string, lang: Lang) {
   const lines = ls.slice(0, 12).map((l) => {
     const t = S.total(l) ?? l.price;
     const d = placeName(l) ?? "";
-    return `• <b>${t ?? "?"} €</b> · ${esc(KIND_LABEL[l.kind])}${d ? " · " + esc(d) : ""}\n  <a href="${esc(l.url)}">${esc(l.title.slice(0, 70))}</a>`;
+    const k = kindLabel(lang, l.kind);
+    return `• <b>${t ?? "?"} €</b>${k ? " · " + esc(k) : ""}${d ? " · " + esc(d) : ""}\n  <a href="${esc(l.url)}">${esc(l.title.slice(0, 70))}</a>`;
   });
-  const more = ls.length > 12 ? `\n…и ещё ${ls.length - 12}` : "";
+  const more = ls.length > 12 ? "\n" + tr(lang, "digest.more", { n: ls.length - 12 }) : "";
   await say(chat_id, `${title}\n\n${lines.join("\n")}${more}`, {
-    reply_markup: { inline_keyboard: [[{ text: "📱 Открыть все в приложении", web_app: { url: APP_URL } }]] },
+    reply_markup: { inline_keyboard: [[{ text: tr(lang, "btn.openAll"), web_app: { url: APP_URL } }]] },
   });
 }

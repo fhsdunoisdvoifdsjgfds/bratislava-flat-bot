@@ -1,7 +1,9 @@
 // Подписка через Stripe: 7 дней бесплатно, затем ежемесячная оплата.
 // Доступ (уведомления + приложение) — пока подписка trialing/active, у админа и у тех, кому выдан comp.
 // Пока Stripe не настроен (нет ключа или цены) — доступ у всех.
-import { isAdmin, logEvent, meta, setMeta, sql } from "./db.ts";
+import { isAdmin, langOf, logEvent, meta, setMeta, sql } from "./db.ts";
+import { fmtDate, intlLocale, L, langOr, tr } from "./i18n.ts";
+import type { Lang } from "./i18n.ts";
 import { esc, say, SELF_URL, tg, token } from "./tg.ts";
 
 export const ACCESS_STATUSES = ["trialing", "active"];
@@ -216,7 +218,7 @@ const ts = (x: number | null | undefined) => (x ? new Date(x * 1000) : null);
 async function applySubscription(sub: any) {
   const chat = await chatFor(sub);
   if (!chat) return console.error("stripe: не нашёл пользователя для подписки", sub.id);
-  const [prev] = await sql`select sub_status, stripe_sub from flatbot.subscribers where chat_id = ${chat}`;
+  const [prev] = await sql`select sub_status, stripe_sub, settings->>'lang' as lang from flatbot.subscribers where chat_id = ${chat}`;
   if (!prev) return console.error("stripe: нет подписчика", chat);
   // у пользователя может быть несколько подписок — не даём старой отменённой затереть живую
   if (prev.stripe_sub && prev.stripe_sub !== sub.id && ACCESS_STATUSES.includes(prev.sub_status) && !ACCESS_STATUSES.includes(sub.status)) return;
@@ -231,24 +233,26 @@ async function applySubscription(sub: any) {
   await logEvent(chat, "subscription", { status: sub.status, prev: prev.sub_status ?? null });
 
   const wasOk = ACCESS_STATUSES.includes(prev.sub_status ?? "");
+  const lang = langOr(prev.lang);
+  const t = L(lang);
   if (sub.status === "trialing" && !prev.sub_status) {
-    const end = ts(sub.trial_end)?.toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Bratislava" });
-    await say(chat, `✅ <b>Пробный период активирован!</b>\n\n7 дней всё бесплатно${end ? ` — до ${end}` : ""}. Новые объявления будут приходить сюда. Отменить подписку можно в любой момент.`);
+    const endAt = ts(sub.trial_end);
+    const end = endAt ? fmtDate(lang, endAt, { day: "numeric", month: "long" }) : null;
+    await say(chat, t("sub.trial", { until: end ? t("sub.until", { date: end }) : "" }));
   } else if (sub.status === "active" && !prev.sub_status) {
-    await say(chat, "✅ <b>Подписка оформлена.</b> Новые объявления будут приходить сюда.");
+    await say(chat, t("sub.active"));
   } else if (BLOCKED_STATUSES.includes(sub.status) && (wasOk || !prev.sub_status)) {
-    await nag(chat, sub.status);
+    await nag(chat, sub.status, lang);
   }
 }
 
 // «Нужно оплатить»: сразу при неудачном списании, потом ещё до двух раз раз в сутки (из tick)
-export async function nag(chat: number, status: string) {
-  const text = status === "canceled"
-    ? "⛔️ <b>Подписка закончилась.</b>\n\nНовые объявления больше не приходят. Оформите подписку, чтобы снова узнавать о квартирах первыми."
-    : "⚠️ <b>Не удалось списать оплату за подписку.</b>\n\nДоступ к новым объявлениям приостановлен. Оплатите — и уведомления сразу продолжат приходить.";
+export async function nag(chat: number, status: string, lang?: Lang) {
   try {
+    lang ??= await langOf(chat);
+    const text = tr(lang, status === "canceled" ? "nag.canceled" : "nag.failed");
     const url = await payLink(chat);
-    await say(chat, text, { reply_markup: { inline_keyboard: [[{ text: "💳 Оплатить подписку", url }]] } });
+    await say(chat, text, { reply_markup: { inline_keyboard: [[{ text: tr(lang, "btn.pay"), url }]] } });
     await sql`update flatbot.subscribers set pay_nag_at = now(), pay_nag_count = pay_nag_count + 1 where chat_id = ${chat}`;
     await logEvent(chat, "pay_nag", { status });
   } catch (e) {
@@ -259,10 +263,10 @@ export async function nag(chat: number, status: string) {
 export async function nagTick() {
   if (!(await cfg()).enabled) return 0;
   const due = await sql`
-    select chat_id, sub_status from flatbot.subscribers
+    select chat_id, sub_status, settings->>'lang' as lang from flatbot.subscribers
     where active and not comp and sub_status = any(${BLOCKED_STATUSES}::text[])
       and pay_nag_count between 1 and 2 and pay_nag_at < now() - interval '24 hours'`;
-  for (const d of due) if (!(await isAdmin(Number(d.chat_id)))) await nag(Number(d.chat_id), d.sub_status);
+  for (const d of due) if (!(await isAdmin(Number(d.chat_id)))) await nag(Number(d.chat_id), d.sub_status, langOr(d.lang));
   return due.length;
 }
 
@@ -337,5 +341,8 @@ export async function setup(key: string | null, price: string | null) {
   return { ok: true, webhook: wh.id, livemode: wh.livemode, price: info };
 }
 
-export const paywallText = (p: any) =>
-  p ? `${esc(String(p.amount).replace(".", ","))} ${p.currency === "EUR" ? "€" : p.currency}/${p.interval === "year" ? "год" : "мес"}` : "";
+// «4,99 €/мес», «4.99 €/month»
+export const paywallText = (p: any, lang: Lang = "en") =>
+  p
+    ? `${esc(Number(p.amount).toLocaleString(intlLocale(lang), { maximumFractionDigits: 2, useGrouping: false }))} ${p.currency === "EUR" ? "€" : esc(String(p.currency))}/${tr(lang, p.interval === "year" ? "price.year" : "price.month")}`
+    : "";

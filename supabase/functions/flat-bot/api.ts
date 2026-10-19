@@ -2,6 +2,8 @@
 // работают без авторизации; личные (настройки, избранное, напоминания) требуют
 // подписанный Telegram initData.
 import { DEFAULT_SETTINGS, isAdmin, logEvent, meta, MIN_PRICE, NO_LIMIT, settingsOf, sql } from "./db.ts";
+import type { Settings } from "./db.ts";
+import { asLang } from "./i18n.ts";
 import * as G from "./geo.ts";
 import * as S from "./sources.ts";
 import { token } from "./tg.ts";
@@ -256,7 +258,7 @@ async function bootstrap(user: User | null, body: any = {}) {
       isAdmin: await isAdmin(user.id),
       id: user.id,
       name,
-      settings: settingsOf(s.settings),
+      settings: forApp(settingsOf(s.settings)),
       onboarded: s.onboarded,
       active: s.active,
       counts: c,
@@ -273,6 +275,14 @@ async function bootstrap(user: User | null, body: any = {}) {
   };
 }
 
+// язык, определённый ботом по Telegram (langAuto), приложению не отдаём: иначе оно сочтёт его
+// выбранным и пропустит экран выбора языка. Приложение само определит тот же язык по Telegram.
+function forApp(s: Settings): Settings {
+  if (!s.langAuto) return s;
+  const { lang: _lang, langAuto: _auto, ...rest } = s;
+  return rest;
+}
+
 function cleanSettings(raw: any) {
   const s = settingsOf(raw);
   const kinds = s.kinds.filter((k) => ["flat", "studio", "room", "hostel"].includes(k));
@@ -283,7 +293,8 @@ function cleanSettings(raw: any) {
     minTotal: Math.max(0, Math.min(2000, Number(s.minTotal) || 0)),
     maxTotal: Math.max(50, Math.min(NO_LIMIT, Number(s.maxTotal) || 650)),
     agency: ["any", "private", "agency"].includes(s.agency) ? s.agency : "any",
-    lang: ["ru", "en", "sk", "uk", "be"].includes((s as any).lang) ? (s as any).lang : undefined,
+    lang: asLang((s as any).lang) ?? undefined,
+    langAuto: undefined, // язык пришёл из приложения — значит, выбран пользователем
     regions: (s.regions ?? []).filter((r) => G.REGIONS.some((x) => x.key === r)),
     cities: (s.cities ?? []).filter((c) => /^[a-z0-9-]{2,60}$/.test(c)).slice(0, 60),
     districts: (s.districts ?? []).filter((d) => G.DISTRICTS.some((x) => x[0] === d)),
@@ -312,6 +323,9 @@ export async function handleApi(body: any) {
       const u = need();
       const s = cleanSettings(body.settings);
       const [prev] = await sql`select settings, onboarded from flatbot.subscribers where chat_id = ${u.id}`;
+      // старая версия приложения могла не прислать язык — оставляем сохранённый
+      const prevS = settingsOf(prev?.settings);
+      if (!s.lang && prevS.lang) Object.assign(s, { lang: prevS.lang, langAuto: prevS.langAuto });
       await sql`update flatbot.subscribers set settings = ${sql.json(s as any)}, active = true,
                 onboarded = onboarded or ${!!body.onboarded} where chat_id = ${u.id}`;
       // сообщение в чат: после онбординга — подтверждение с примерами, потом — «фильтр обновлён»
@@ -327,7 +341,7 @@ export async function handleApi(body: any) {
         // @ts-ignore EdgeRuntime есть в среде Supabase
         EdgeRuntime.waitUntil(sendSetup(u.id, s, first ? "welcome" : "updated").catch((e) => console.error("setup msg", e)));
       }
-      return { ok: true, settings: s };
+      return { ok: true, settings: forApp(s) };
     }
     case "fav": {
       const u = need();
