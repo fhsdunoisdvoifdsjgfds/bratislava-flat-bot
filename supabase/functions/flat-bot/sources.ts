@@ -285,6 +285,9 @@ function classify(l: Listing, hint: Kind | null) {
   const t = fold(l.title);
   const f = fold(`${l.title}\n${l.text.slice(0, 400)}`);
   if (/ubytovn|ubytovanie pre (pracovn|robotn)|robotnick|\bhostel/.test(f)) l.kind = "hostel";
+  // «Izba na prenájom v novom byte» — комната, хотя в заголовке есть «byt»
+  else if (/^\W*(prenajom\s+|prenajmem\s+|ponukam\s+)?(samostatn\w*\s+|zariaden\w*\s+|pekn\w*\s+|velk\w*\s+|mal\w*\s+)?izb[auy]\b|spolubyvan|\blozk[oa]\b/.test(t) ||
+    (/\bizb[auy]\s+(na|v|pre|s)\b/.test(t) && !/\d(?:[.,]5)?\s*[-–]?\s*izb\w*\s+(byt|na\s+prenajom)/.test(t))) l.kind = "room";
   else if (/garson|garzon|\bstudio\b|1\s*[-–]?\s*izb/.test(t)) l.kind = "studio";
   else if (/\d(?:[.,]5)?\s*[-–]?\s*izb|\bbyt\b|\bbytu\b|apartman|mezonet/.test(t)) l.kind = "flat";
   else if (/\bizb[auy]\b|\bizbu\b|\bizbou\b|spolubyvan|\broom\b|\blozko\b/.test(t)) l.kind = "room";

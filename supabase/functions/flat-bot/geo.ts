@@ -152,11 +152,21 @@ export function townFromName(raw: string | null | undefined): Town | null {
   return null;
 }
 
+// сокращения в заголовках: «Centrum BB», «KE - Západ», «BA II»
+const ALIASES: [RegExp, string][] = [
+  [/\bBA\b/, "bratislava"], [/\bKE\b/, "kosice"], [/\bBB\b/, "banska-bystrica"],
+  [/\bNR\b/, "nitra"], [/\bTN\b/, "trencin"], [/\bTT\b/, "trnava"], [/\bZV\b/, "zvolen"], [/\bPP\b/, "poprad"],
+];
+
 export function detectTown(texts: (string | null | undefined)[], stems = true): Town | null {
   for (const s of texts) {
     if (!s) continue;
     const f = fold(s);
     for (const t of TOWNS) if (t.exact.test(f)) return t;
+  }
+  for (const s of texts) {
+    if (!s) continue;
+    for (const [re, k] of ALIASES) if (re.test(s)) return townByKey.get(k) ?? null;
   }
   if (!stems) return null;
   for (const s of texts) {
