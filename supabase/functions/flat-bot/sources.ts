@@ -42,12 +42,38 @@ const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36";
 
 export async function get(url: string): Promise<string> {
-  const r = await fetch(url, {
-    headers: { "User-Agent": UA, "Accept-Language": "sk,en;q=0.8" },
-    signal: AbortSignal.timeout(25_000),
-  });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return await r.text();
+  for (let attempt = 0; ; attempt++) {
+    const r = await fetch(url, {
+      headers: { "User-Agent": UA, "Accept-Language": "sk,en;q=0.8" },
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (r.ok) return await r.text();
+    // сайты иногда отвечают 502/503 — один повтор через пару секунд
+    if (r.status >= 500 && attempt === 0) {
+      await r.body?.cancel();
+      await new Promise((res) => setTimeout(res, 2000));
+      continue;
+    }
+    throw new Error(`HTTP ${r.status}`);
+  }
+}
+
+// постраничный обход: ошибка первой страницы — ошибка источника,
+// ошибка следующих (404 за концом выдачи, 502) — просто конец обхода
+async function pages<T>(list: T[], fetchPage: (p: T) => Promise<Listing[]>) {
+  const out: Listing[] = [];
+  for (const [i, p] of list.entries()) {
+    try {
+      const got = await fetchPage(p);
+      out.push(...got);
+      if (i > 0 && !got.length) break;
+    } catch (e) {
+      if (i === 0) throw e;
+      console.error("page", p, String(e));
+      break;
+    }
+  }
+  return out;
 }
 
 const ENT: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
@@ -254,9 +280,9 @@ export function finalize(l: Listing, hint: Kind | null = null) {
 // ---------------------------------------------------------------- bazos.sk
 const SEEKER = /(^|[^\p{L}])(h[lľ]ad[aá]me?|dopyt|sh[aá]n[ií]m|kúpim)([^\p{L}]|$)/iu;
 
-export async function bazos(category: "byt" | "podnajom", maxPrice: number, radius: number, offsets = [0, 20]) {
-  const out: Listing[] = [];
-  for (const offset of offsets) {
+export function bazos(category: "byt" | "podnajom", maxPrice: number, radius: number, offsets = [0, 20]) {
+  return pages(offsets, async (offset) => {
+    const out: Listing[] = [];
     const html = await get(
       `https://reality.bazos.sk/prenajmu/${category}/${offset ? offset + "/" : ""}?hlokalita=81101&humkreis=${radius}&cenado=${maxPrice}`,
     );
@@ -274,8 +300,8 @@ export async function bazos(category: "byt" | "podnajom", maxPrice: number, radi
       if (img) l.images.push(`https://www.bazos.sk/img/1/${img[1]}/${img[2]}.jpg`);
       out.push(finalize(l, category === "podnajom" ? "room" : null));
     }
-  }
-  return out;
+    return out;
+  });
 }
 
 export async function bazosDetail(l: Listing) {
@@ -306,9 +332,9 @@ function ldBlocks(html: string): any[] {
 }
 const isType = (n: any, t: string) => (Array.isArray(n["@type"]) ? n["@type"].includes(t) : n["@type"] === t);
 
-export async function nehnutelnosti(maxPrice: number, pages = [1]) {
-  const out: Listing[] = [];
-  for (const page of pages) {
+export function nehnutelnosti(maxPrice: number, pageList = [1]) {
+  return pages(pageList, async (page) => {
+    const out: Listing[] = [];
     const html = await get(
       `https://www.nehnutelnosti.sk/vysledky/byty/bratislavsky-kraj/prenajom?priceTo=${maxPrice}&order=NEWEST` +
         (page > 1 ? `&page=${page}` : ""),
@@ -318,6 +344,7 @@ export async function nehnutelnosti(maxPrice: number, pages = [1]) {
     for (const n of nodes) if (isType(n, "RealEstateAgent")) agents.set(n["@id"], n.name);
     const items = nodes.find((n) => isType(n, "SearchResultsPage"))?.mainEntity?.itemListElement ?? [];
     if (!items.length && page === 1) throw new Error("не нашёл список объявлений (сменилась вёрстка?)");
+    if (page > 1) await new Promise((res) => setTimeout(res, 500)); // не дёргаем сайт слишком часто
     for (const { item: it } of items) {
       const l = blank("nehnutelnosti", String(it["@id"]).split("/").pop()!, it.url, String(it.name ?? "").trim());
       l.price = int(it.priceSpecification?.price);
@@ -336,8 +363,8 @@ export async function nehnutelnosti(maxPrice: number, pages = [1]) {
       const cat = fold(it.category ?? "");
       out.push(finalize(l, /garson|1 izb/.test(cat) ? "studio" : "flat"));
     }
-  }
-  return out;
+    return out;
+  });
 }
 
 export async function nehnutelnostiDetail(l: Listing) {
@@ -367,14 +394,14 @@ export async function nehnutelnostiDetail(l: Listing) {
 }
 
 // ---------------------------------------------------------- topreality.sk
-export async function topreality(maxPrice: number, pages = [1]) {
+export function topreality(maxPrice: number, pageList = [1]) {
   const types = [101, 108, 102, 103, 104, 109, 110, 107].map((t) => `&type%5B%5D=${t}`).join("");
-  const out: Listing[] = [];
-  for (const page of pages) {
+  return pages(pageList, async (page) => {
+    const out: Listing[] = [];
+    // страницы у topreality — в пути: vyhladavanie-nehnutelnosti-2.html
     const html = await get(
-      `https://www.topreality.sk/vyhladavanie-nehnutelnosti.html?form=3${types}` +
-        `&obec=c100-Bratislavsk%C3%BD+kraj&cena_do=${maxPrice}&searchType=string&n_search=search&sort=date_desc` +
-        (page > 1 ? `&page=${page}` : ""),
+      `https://www.topreality.sk/vyhladavanie-nehnutelnosti${page > 1 ? `-${page}` : ""}.html?form=3${types}` +
+        `&obec=c100-Bratislavsk%C3%BD+kraj&cena_do=${maxPrice}&searchType=string&n_search=search&sort=date_desc`,
     );
     for (const card of html.split('data-ga4-container-item_id_generic="').slice(1)) {
       const id = card.match(/^(\d+)/)?.[1];
@@ -395,8 +422,8 @@ export async function topreality(maxPrice: number, pages = [1]) {
       const cat = fold(attr("item_category2"));
       out.push(finalize(l, /garson|1 izb/.test(cat) ? "studio" : "flat"));
     }
-  }
-  return out;
+    return out;
+  });
 }
 
 export async function toprealityDetail(l: Listing) {
@@ -428,9 +455,9 @@ function nextData(html: string) {
 }
 const pick = (v: any, p: string) => Object.entries<any>(v).find(([k]) => k.startsWith(p))?.[1];
 
-export async function bezrealitky(pages = [1]) {
-  const out: Listing[] = [];
-  for (const page of pages) {
+export function bezrealitky(pageList = [1]) {
+  return pages(pageList, async (page) => {
+    const out: Listing[] = [];
     const pp = nextData(
       await get(
         "https://www.bezrealitky.sk/vypis/ponuka-prenajom/byt/bratislava?order=TIMEORDER_DESC" +
@@ -464,8 +491,8 @@ export async function bezrealitky(pages = [1]) {
       l.tags.push(...((pick(v, "tags") ?? []) as string[]).slice(0, 3));
       out.push(finalize(l, v.roommate ? "room" : /GARS|DISP_1/.test(disp) ? "studio" : "flat"));
     }
-  }
-  return out;
+    return out;
+  });
 }
 
 export async function bezrealitkyDetail(l: Listing) {
