@@ -19,6 +19,7 @@ export type Settings = {
   minTotal: number;
   maxTotal: number;
   agency: "any" | "private" | "agency";
+  lang?: "ru" | "en" | "sk" | "uk" | "be";
   // где искать: объявление подходит, если совпал край ИЛИ город ИЛИ район Братиславы; всё пусто — вся Словакия
   regions: string[];
   cities: string[];
@@ -143,4 +144,20 @@ export async function saveDetailed(l: Listing) {
       price = ${l.price}, total = ${S.total(l)}, area = ${l.area}, lat = ${l.lat}, lng = ${l.lng},
       has_phone = ${l.phones.length > 0}, has_photo = ${l.images.length > 0}, detailed = true
     where key = ${S.key(l)}`;
+}
+
+// ---------------------------------------------------------------- журнал действий (для админ-панели)
+export async function logEvent(chat: number, type: string, data: Record<string, unknown> = {}) {
+  try {
+    await sql`insert into flatbot.events (chat_id, type, data) values (${chat}, ${type}, ${sql.json(data as any)})`;
+    await sql`update flatbot.subscribers set last_seen_at = now() where chat_id = ${chat}
+              and ${!["notified", "digest", "reminder_sent"].includes(type)}`;
+  } catch (e) {
+    console.error("logEvent", type, e);
+  }
+}
+
+export async function isAdmin(chat: number) {
+  const admins = ((await meta("admins")) ?? []) as number[];
+  return admins.map(Number).includes(Number(chat));
 }

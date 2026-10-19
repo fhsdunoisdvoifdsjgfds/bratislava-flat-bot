@@ -1,7 +1,7 @@
 // API для Telegram Mini App. Публичные операции (лента, карточка, статистика)
 // работают без авторизации; личные (настройки, избранное, напоминания) требуют
 // подписанный Telegram initData.
-import { DEFAULT_SETTINGS, meta, MIN_PRICE, NO_LIMIT, settingsOf, sql } from "./db.ts";
+import { DEFAULT_SETTINGS, isAdmin, logEvent, meta, MIN_PRICE, NO_LIMIT, settingsOf, sql } from "./db.ts";
 import * as G from "./geo.ts";
 import * as S from "./sources.ts";
 import { token } from "./tg.ts";
@@ -132,6 +132,7 @@ async function mapPoints(body: any, user: User | null) {
 
 async function listing(body: any, user: User | null) {
   const key = String(body.key ?? "");
+  if (user && !body.peek) await logEvent(user.id, "view", { key });
   const [l] = await sql`
     with ${MEDIANS}
     select l.data, l.posted_at, l.first_seen, l.total, l.seeded,
@@ -205,7 +206,7 @@ async function stats() {
   return { byCity, byKind, bySource, perDay, totals };
 }
 
-async function bootstrap(user: User | null) {
+async function bootstrap(user: User | null, body: any = {}) {
   const [regionRows, cityRows, districtRows] = await Promise.all([
     sql`select region, count(*)::int as n from flatbot.listings
         where kind is not null and price >= 150 and posted_at > now() - interval '30 days' and region is not null group by region`,
@@ -234,7 +235,11 @@ async function bootstrap(user: User | null) {
         (select count(*)::int from flatbot.favorites where chat_id = ${user.id}) as favorites,
         (select count(*)::int from flatbot.reminders where chat_id = ${user.id} and not sent) as reminders`;
     const favKeys = await sql`select key from flatbot.favorites where chat_id = ${user.id}`;
+    const [recent] = await sql`select 1 from flatbot.events where chat_id = ${user.id} and type = 'app_open'
+                               and created_at > now() - interval '30 minutes' limit 1`;
+    if (!recent) await logEvent(user.id, "app_open", { platform: body?.platform ?? null });
     me = {
+      isAdmin: await isAdmin(user.id),
       id: user.id,
       name,
       settings: settingsOf(s.settings),
@@ -280,7 +285,7 @@ export async function handleApi(body: any) {
   };
   switch (body.op) {
     case "bootstrap":
-      return bootstrap(user);
+      return bootstrap(user, body);
     case "feed":
       return feed(body, user);
     case "map":
@@ -298,6 +303,11 @@ export async function handleApi(body: any) {
       // сообщение в чат: после онбординга — подтверждение с примерами, потом — «фильтр обновлён»
       const { sendSetup, summaryKey } = await import("./notify.ts");
       const first = !!body.onboarded && !prev?.onboarded;
+      await logEvent(u.id, first ? "onboarded" : "settings", {
+        lang: s.lang ?? null, regions: s.regions, cities: s.cities, districts: s.districts, kinds: s.kinds,
+        maxTotal: s.maxTotal, agency: s.agency, mode: s.notify.mode,
+        langChanged: settingsOf(prev?.settings).lang !== s.lang ? true : undefined,
+      });
       const changed = prev && summaryKey(settingsOf(prev.settings)) !== summaryKey(s);
       if (first || (changed && prev?.onboarded && s.notify.mode !== "off")) {
         // @ts-ignore EdgeRuntime есть в среде Supabase
@@ -309,12 +319,14 @@ export async function handleApi(body: any) {
       const u = need();
       if (body.on) await sql`insert into flatbot.favorites (chat_id, key) values (${u.id}, ${body.key}) on conflict do nothing`;
       else await sql`delete from flatbot.favorites where chat_id = ${u.id} and key = ${body.key}`;
+      await logEvent(u.id, body.on ? "fav_add" : "fav_remove", { key: body.key });
       return { ok: true };
     }
     case "hide": {
       const u = need();
       if (body.on === false) await sql`delete from flatbot.hidden where chat_id = ${u.id} and key = ${body.key}`;
       else await sql`insert into flatbot.hidden (chat_id, key) values (${u.id}, ${body.key}) on conflict do nothing`;
+      await logEvent(u.id, body.on === false ? "unhide" : "hide", { key: body.key });
       return { ok: true };
     }
     case "favorites": {
@@ -343,11 +355,13 @@ export async function handleApi(body: any) {
       if (isNaN(+at) || +at < Date.now() - 60_000 || +at > Date.now() + 90 * 86400_000) return { error: "bad_time" };
       const [r] = await sql`insert into flatbot.reminders (chat_id, key, note, remind_at)
         values (${u.id}, ${body.key ?? null}, ${String(body.note ?? "").slice(0, 300)}, ${at}) returning id`;
+      await logEvent(u.id, "remind_add", { key: body.key ?? null, at: at.toISOString(), note: String(body.note ?? "").slice(0, 80) });
       return { ok: true, id: r.id };
     }
     case "remind_del": {
       const u = need();
       await sql`delete from flatbot.reminders where chat_id = ${u.id} and id = ${Number(body.id)}`;
+      await logEvent(u.id, "remind_del", { id: Number(body.id) });
       return { ok: true };
     }
     case "notify_test": {
@@ -355,7 +369,20 @@ export async function handleApi(body: any) {
       const [row] = await sql`select settings from flatbot.subscribers where chat_id = ${u.id}`;
       const { sendSetup } = await import("./notify.ts");
       await sendSetup(u.id, settingsOf(row?.settings), "test");
+      await logEvent(u.id, "notify_test");
       return { ok: true };
+    }
+    case "admin_overview":
+    case "admin_users":
+    case "admin_user":
+    case "admin_events": {
+      const u = need();
+      if (!(await isAdmin(u.id))) throw new Response(JSON.stringify({ error: "forbidden" }), { status: 403 });
+      const A = await import("./admin.ts");
+      if (body.op === "admin_overview") return A.adminOverview();
+      if (body.op === "admin_users") return A.adminUsers();
+      if (body.op === "admin_user") return A.adminUser(Number(body.id));
+      return A.adminEvents(body);
     }
     default:
       return { error: "unknown_op" };

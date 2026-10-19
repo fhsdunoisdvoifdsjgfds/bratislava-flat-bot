@@ -9,7 +9,7 @@
 //  POST ?action=setup     + x-bot-token      — сохранить токен и подключить вебхук
 //  GET  ?action=call&n=+421…                 — редирект на tel: для кнопки «Позвонить»
 import { handleApi } from "./api.ts";
-import { matches, meta, saveDetailed, setMeta, settingsOf, sql, upsertListings } from "./db.ts";
+import { logEvent, matches, meta, saveDetailed, setMeta, settingsOf, sql, upsertListings } from "./db.ts";
 import type { Settings } from "./db.ts";
 import * as G from "./geo.ts";
 import * as S from "./sources.ts";
@@ -111,8 +111,10 @@ async function check() {
         try {
           await sendListing(chat, l);
           sent++;
+          await logEvent(chat, "notified", { key: S.key(l) });
         } catch (e) {
           console.error("send", chat, e);
+          await logEvent(chat, "notify_failed", { key: S.key(l), error: String(e).slice(0, 120) });
         }
         await sleep(60);
       }
@@ -158,6 +160,7 @@ async function tick() {
       if (r.data) await sendListing(Number(r.chat_id), r.data, `⏰ <b>Напоминание</b>${note}\n\n`);
       else await say(Number(r.chat_id), `⏰ <b>Напоминание</b>${note || "\nВы просили напомнить."}`);
       out.reminders++;
+      await logEvent(Number(r.chat_id), "reminder_sent", { id: Number(r.id) });
     } catch (e) {
       console.error("reminder", r.id, e);
     }
@@ -193,6 +196,7 @@ async function tick() {
       }
       await sql`update flatbot.subscribers set last_digest_at = now() where chat_id = ${chat}`;
       out.digests++;
+      await logEvent(chat, "digest", { n: items.length, kind: flush });
     } catch (e) {
       console.error("digest", chat, e);
     }
@@ -254,6 +258,7 @@ const HELP =
 async function handleUpdate(u: any) {
   if (u.my_chat_member?.new_chat_member?.status === "kicked") {
     await sql`update flatbot.subscribers set active = false where chat_id = ${u.my_chat_member.chat.id}`;
+    await logEvent(u.my_chat_member.chat.id, "blocked");
     return;
   }
   const msg = u.message;
@@ -262,7 +267,23 @@ async function handleUpdate(u: any) {
   const name = msg.chat.title ?? [msg.chat.first_name, msg.chat.last_name].filter(Boolean).join(" ");
   const cmd = String(msg.text ?? "").trim().split(/[\s@]/)[0].toLowerCase();
 
+  // «/admin КОД» — одноразовая выдача прав админа владельцу бота
+  if (cmd === "/admin") {
+    const code = String(msg.text ?? "").trim().split(/\s+/)[1] ?? "";
+    const expected = await meta("admin_code");
+    if (expected && code === expected) {
+      const admins = ((await meta("admins")) ?? []) as number[];
+      await setMeta("admins", [...new Set([...admins.map(Number), chat_id])]);
+      await setMeta("admin_code", null);
+      await logEvent(chat_id, "admin_granted");
+      await say(chat_id, "🛡 <b>Готово, вы админ.</b> Админ-панель — в приложении: Настройки → «Админ-панель».", { reply_markup: appButton() });
+    } else {
+      await say(chat_id, "Неизвестная команда.");
+    }
+    return;
+  }
   if (cmd === "/stop") {
+    await logEvent(chat_id, "stop");
     await sql`update flatbot.subscribers set active = false where chat_id = ${chat_id}`;
     await say(chat_id, "Отписал. Чтобы снова получать объявления — /start");
     return;
@@ -272,6 +293,10 @@ async function handleUpdate(u: any) {
   await sql`insert into flatbot.subscribers (chat_id, name, username, active) values (${chat_id}, ${name}, ${msg.chat.username ?? null}, true)
             on conflict (chat_id) do update set active = true, name = excluded.name, username = excluded.username`;
   const isNew = !prev || !prev.active;
+  await logEvent(chat_id, cmd.startsWith("/") ? "command" : "message", {
+    cmd: cmd.startsWith("/") ? cmd : undefined, isNew: isNew || undefined,
+    text: cmd.startsWith("/") ? undefined : String(msg.text ?? "").slice(0, 120),
+  });
 
   if (cmd === "/status") {
     const lc = await meta("last_check");

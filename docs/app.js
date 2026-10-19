@@ -1035,7 +1035,7 @@
     const c = el(`<div class="mapcard"><div class="card row"><div class="thumb sk"></div><div class="info"><div class="sk" style="height:18px;width:50%"></div></div></div></div>`);
     document.body.append(c);
     try {
-      const r = await api("listing", { key });
+      const r = await api("listing", { key, peek: true }); // превью на карте — не «просмотр»
       const it = { ...r.item, img: r.item.images?.[0], has_phone: r.item.phones?.length > 0, posted_at: r.item.posted_at };
       c.innerHTML = cardHTML(it, "list");
     } catch {
@@ -1562,6 +1562,7 @@
       <div class="group-title">${esc(t("settings.other"))}</div>
       <div class="group">
         <button class="cell" id="s-onb"><span class="ic" style="background:#12a46c">✨</span><span class="lbl">${esc(t("settings.redo"))}</span>${ic("chev").replace("<svg", '<svg class="chev"')}</button>
+        ${st.me?.isAdmin ? `<button class="cell" id="s-admin"><span class="ic" style="background:#1c2333">🛡️</span><span class="lbl">Админ-панель<small>пользователи и их действия — видно только вам</small></span>${ic("chev").replace("<svg", '<svg class="chev"')}</button>` : ""}
       </div>
       <div style="padding:6px 16px 16px"><button class="btn block" id="s-save">${ic("check")}${esc(t("btn.save"))}</button></div>`;
 
@@ -1628,6 +1629,7 @@
     };
     $("#s-lang").onclick = openLanguage;
     $("#s-onb").onclick = () => onboarding();
+    $("#s-admin")?.addEventListener("click", () => (haptic.tap(), window.FBAdmin?.open()));
     $("#s-save").onclick = async () => {
       st.settings = s;
       st.filters = filtersFrom(s);
@@ -1772,7 +1774,7 @@
     document.title = t("app.title");
     $("#screen").innerHTML = `<header class="top"><h1 class="title">${esc(t("app.title"))}</h1></header><div class="feed">${skeletons("cards")}</div>`;
     try {
-      st.boot = await api("bootstrap");
+      st.boot = await api("bootstrap", { platform: tg?.platform ?? "web" });
     } catch {
       $("#screen").innerHTML = `<div class="empty" style="padding-top:120px"><div class="ico">📡</div><h3>${esc(t("err.server"))}</h3>${esc(t("err.serverText"))}<br><br><button class="btn sm" onclick="location.reload()">${ic("refresh")}${esc(t("btn.reload"))}</button></div>`;
       return;
@@ -1805,5 +1807,7 @@
     const key = fromHash || fromStart;
     if (key && onboarded) openListing(key);
   }
+  // для админ-панели (admin.js): небольшой набор внутренних помощников
+  window.FBApp = { api, pushLayer, closeLayer, sheet, toast, haptic, el, esc, $, $$, fmt, ago, ic, openListing, locLabel, budgetText };
   start();
 })();
