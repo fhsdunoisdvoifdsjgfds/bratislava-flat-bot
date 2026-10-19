@@ -610,6 +610,7 @@
     f.loading = true;
     try {
       const r = await api("feed", { filters: { ...st.filters, q: st.q }, sort: st.sort, offset: f.offset, limit: 24 });
+      if (r.paywall) showPaywall();
       if (gen !== f.gen) return;
       if (reset) $("#feed").innerHTML = "";
       f.items.push(...r.items);
@@ -1063,7 +1064,12 @@
     let r;
     try {
       r = await api("listing", { key });
-    } catch {
+    } catch (e) {
+      if (e.message === "paywall") {
+        closeLayer();
+        showPaywall();
+        return;
+      }
       page.innerHTML = `<div class="empty" style="padding-top:120px"><div class="ico">🫥</div><h3>${esc(t("listing.notFound"))}</h3>${esc(t("listing.notFoundText"))}<br><br><button class="btn sm ghost" id="x">${esc(t("btn.back"))}</button></div>`;
       $("#x", page).onclick = closeLayer;
       return;
@@ -1562,6 +1568,7 @@
       <div class="group-title">${esc(t("settings.other"))}</div>
       <div class="group">
         <button class="cell" id="s-onb"><span class="ic" style="background:#12a46c">✨</span><span class="lbl">${esc(t("settings.redo"))}</span>${ic("chev").replace("<svg", '<svg class="chev"')}</button>
+        ${st.me?.access?.enabled && window.FBPaywall ? `<button class="cell" id="s-sub"><span class="ic" style="background:linear-gradient(135deg,#12a46c,#0f8f5f)">💳</span><span class="lbl">${esc(window.FBPaywall.label())}<small>${esc(window.FBPaywall.status(st.me.access))}</small></span>${ic("chev").replace("<svg", '<svg class="chev"')}</button>` : ""}
         ${st.me?.isAdmin ? `<button class="cell" id="s-admin"><span class="ic" style="background:#1c2333">🛡️</span><span class="lbl">Админ-панель<small>пользователи и их действия — видно только вам</small></span>${ic("chev").replace("<svg", '<svg class="chev"')}</button>` : ""}
       </div>
       <div style="padding:6px 16px 16px"><button class="btn block" id="s-save">${ic("check")}${esc(t("btn.save"))}</button></div>`;
@@ -1630,6 +1637,18 @@
     $("#s-lang").onclick = openLanguage;
     $("#s-onb").onclick = () => onboarding();
     $("#s-admin")?.addEventListener("click", () => (haptic.tap(), window.FBAdmin?.open()));
+    $("#s-sub")?.addEventListener("click", async () => {
+      haptic.tap();
+      const a = st.me.access;
+      // подписка есть — открываем портал Stripe (смена карты, отмена), иначе — экран подписки
+      if (["trialing", "active", "past_due", "unpaid"].includes(a.status)) {
+        try {
+          openLink((await api("pay")).url);
+        } catch {
+          toast("Stripe ✕");
+        }
+      } else if (!a.ok) showPaywall();
+    });
     $("#s-save").onclick = async () => {
       st.settings = s;
       st.filters = filtersFrom(s);
@@ -1737,6 +1756,7 @@
       }
       await saveSettings(true);
       go("feed");
+      if (needPaywall()) showPaywall(); // подписка оформляется сразу после настройки
     }
     next.onclick = () => {
       haptic.tap();
@@ -1800,6 +1820,7 @@
     renderTabs();
     go("feed");
     if (!onboarded) onboarding();
+    else if (needPaywall()) showPaywall();
 
     // ссылка на конкретное объявление: #l=bazos:123 или start_param бота
     const fromHash = new URLSearchParams(location.hash.slice(1)).get("l");
@@ -1807,6 +1828,27 @@
     const key = fromHash || fromStart;
     if (key && onboarded) openListing(key);
   }
+  // ---------------------------------------------------------------- подписка (paywall.js)
+  const needPaywall = () => !!(inTG && st.me?.access?.enabled && !st.me.access.ok);
+  let paywallOpen = false;
+  async function showPaywall() {
+    if (paywallOpen || !window.FBPaywall || !inTG) return;
+    paywallOpen = true;
+    try {
+      await window.FBPaywall.show({
+        access: st.me?.access, price: st.me?.price,
+        onUnlocked: async () => {
+          try {
+            st.me.access = (await api("access")).access;
+          } catch { /* обновим при следующем запуске */ }
+          if (st.tab === "feed") loadFeed(true);
+        },
+      });
+    } finally {
+      paywallOpen = false;
+    }
+  }
+
   // для админ-панели (admin.js): небольшой набор внутренних помощников
   window.FBApp = { api, pushLayer, closeLayer, sheet, toast, haptic, el, esc, $, $$, fmt, ago, ic, openListing, locLabel, budgetText };
   start();

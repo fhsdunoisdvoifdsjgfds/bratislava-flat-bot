@@ -13,7 +13,11 @@ export async function adminOverview() {
         (select count(distinct chat_id)::int from flatbot.events where created_at > now() - interval '7 days'
            and type not in ('notified', 'digest', 'reminder_sent')) as wau,
         (select count(*)::int from flatbot.events where type = 'notified' and created_at > now() - interval '24 hours') as notified24,
-        (select count(*)::int from flatbot.listings where first_seen > now() - interval '24 hours' and not seeded) as listings24`,
+        (select count(*)::int from flatbot.listings where first_seen > now() - interval '24 hours' and not seeded) as listings24,
+        (select count(*)::int from flatbot.subscribers where sub_status = 'trialing') as trialing,
+        (select count(*)::int from flatbot.subscribers where sub_status = 'active') as paying,
+        (select count(*)::int from flatbot.subscribers where sub_status in ('past_due', 'unpaid')) as past_due,
+        (select count(*)::int from flatbot.subscribers where comp and chat_id <> 1000001) as comp`,
     sql`select (created_at at time zone 'Europe/Bratislava')::date as day,
           count(distinct chat_id) filter (where type not in ('notified', 'digest', 'reminder_sent'))::int as users,
           count(*) filter (where type = 'notified')::int as notified
@@ -27,6 +31,7 @@ export async function adminOverview() {
 export async function adminUsers() {
   const users = await sql`
     select s.chat_id, s.name, s.username, s.active, s.onboarded, s.created_at, s.last_seen_at, s.settings,
+      s.comp, s.sub_status, s.trial_end, s.period_end, s.cancel_at_period_end, s.stripe_customer, s.email,
       (select count(*)::int from flatbot.favorites f where f.chat_id = s.chat_id) as favs,
       (select count(*)::int from flatbot.reminders r where r.chat_id = s.chat_id and not r.sent) as reminders,
       (select count(*)::int from flatbot.events e where e.chat_id = s.chat_id and e.type = 'notified') as notified,

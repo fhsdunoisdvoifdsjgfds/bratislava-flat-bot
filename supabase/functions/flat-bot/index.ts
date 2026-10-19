@@ -15,6 +15,7 @@ import * as G from "./geo.ts";
 import * as S from "./sources.ts";
 import type { Listing } from "./sources.ts";
 import { APP_URL, esc, say, SELF_URL, sendDigest, sendListing, setToken, sleep, tg, token } from "./tg.ts";
+import { accessFilter, accessOf, cfg as stripeCfg, handleWebhook, nagTick, payLink, priceInfo, paywallText, setup as stripeSetup } from "./stripe.ts";
 
 
 // ---------------------------------------------------------------- время по Братиславе
@@ -97,9 +98,11 @@ async function check() {
 
   let sent = 0, queued = 0;
   if (ready && fresh.length) {
-    const subs = await sql`select chat_id, settings from flatbot.subscribers where active`;
+    const subs = await sql`select chat_id, settings, comp, sub_status from flatbot.subscribers where active`;
+    const allowed = await accessFilter(); // подписка: trialing/active, comp или админ
     for (const l of fresh) {
       for (const sub of subs) {
+        if (!allowed(sub)) continue;
         const s = settingsOf(sub.settings);
         if (s.notify.mode === "off" || !matches(l, s)) continue;
         const chat = Number(sub.chat_id);
@@ -168,10 +171,15 @@ async function tick() {
 
   // 2) очередь: дайджесты и то, что накопилось в «тихие часы»
   const waiting = await sql`
-    select s.chat_id, s.settings, s.last_digest_at, count(q.key)::int as n
+    select s.chat_id, s.settings, s.last_digest_at, s.comp, s.sub_status, count(q.key)::int as n
     from flatbot.queue q join flatbot.subscribers s on s.chat_id = q.chat_id
     where s.active group by s.chat_id`;
+  const allowedQ = await accessFilter();
   for (const w of waiting) {
+    if (!allowedQ(w)) {
+      await sql`delete from flatbot.queue where chat_id = ${w.chat_id}`;
+      continue;
+    }
     const s = settingsOf(w.settings);
     const chat = Number(w.chat_id);
     const mode = s.notify.mode;
@@ -201,6 +209,9 @@ async function tick() {
       console.error("digest", chat, e);
     }
   }
+
+  // напоминания об оплате (повторно, не чаще раза в сутки, максимум 3 раза)
+  await nagTick().catch((e) => console.error("nag", e));
 
   // 3) продавец на Bazoši с 3+ разными объявлениями и «фирменным» именем — агентство
   await sql`
@@ -298,6 +309,24 @@ async function handleUpdate(u: any) {
     text: cmd.startsWith("/") ? undefined : String(msg.text ?? "").slice(0, 120),
   });
 
+  const acc = await accessOf(chat_id);
+  const payButton = async (text: string) => ({ inline_keyboard: [[{ text, url: await payLink(chat_id) }]] });
+  if (cmd === "/pay" || cmd === "/subscribe" || (cmd === "/start" && String(msg.text).includes("pay_cancel"))) {
+    if (!acc.enabled) await say(chat_id, "Сейчас бот бесплатный — ничего оплачивать не нужно.");
+    else if (acc.ok && acc.reason !== "trialing" && acc.reason !== "active") await say(chat_id, "У вас бесплатный доступ — оплачивать ничего не нужно 🙂");
+    else {
+      const p = await priceInfo().catch(() => null);
+      await say(chat_id, acc.ok
+        ? "Управление подпиской — по кнопке ниже."
+        : `💳 <b>Подписка</b>: ${acc.trialAvailable ? "первые 7 дней бесплатно, затем " : ""}${paywallText(p)}. Отменить можно в любой момент.`,
+        { reply_markup: await payButton(acc.ok ? "⚙️ Управлять подпиской" : acc.trialAvailable ? "🎁 Начать 7 дней бесплатно" : "💳 Оформить подписку") });
+    }
+    return;
+  }
+  if (cmd === "/start" && String(msg.text).includes("paid")) {
+    await say(chat_id, acc.ok ? "✅ Готово! Подписка активна — новые объявления будут приходить сюда." : "⏳ Ждём подтверждения оплаты от Stripe — обычно это несколько секунд. Как только придёт, напишу.", { reply_markup: appButton() });
+    return;
+  }
   if (cmd === "/status") {
     const lc = await meta("last_check");
     const lines = lc ? Object.entries(lc.stats).map(([k, v]) => `• ${k}: ${v}`).join("\n") : "ещё не было";
@@ -317,12 +346,17 @@ async function handleUpdate(u: any) {
           "После этого уведомления начнут приходить сюда.",
         { reply_markup: appButton("🚀 Настроить поиск") },
       );
+    } else if (!acc.ok) {
+      await say(chat_id, "👋 <b>С возвращением!</b> Чтобы снова получать новые объявления, оформите подписку.", {
+        reply_markup: await payButton(acc.trialAvailable ? "🎁 Начать 7 дней бесплатно" : "💳 Оформить подписку"),
+      });
     } else {
       await say(chat_id, "👋 <b>С возвращением!</b> " + HELP, { reply_markup: appButton() });
       await sendToday(chat_id, 8);
     }
   } else if (cmd === "/today") {
-    await sendToday(chat_id, 15);
+    if (!acc.ok) await say(chat_id, "🔒 Новые объявления доступны по подписке.", { reply_markup: await payButton(acc.trialAvailable ? "🎁 7 дней бесплатно" : "💳 Оформить подписку") });
+    else await sendToday(chat_id, 15);
   } else {
     await say(chat_id, HELP, { reply_markup: appButton() });
   }
@@ -382,6 +416,22 @@ Deno.serve(async (req) => {
       if (e instanceof Response) return new Response(e.body, { status: e.status, headers: CORS });
       console.error("api", e);
       return Response.json({ error: String(e) }, { status: 500, headers: CORS });
+    }
+  }
+
+  // вебхук Stripe: подпись проверяется внутри
+  if (action === "stripe") {
+    return await handleWebhook(req);
+  }
+  // настройка Stripe: из GitHub Actions (заголовок с токеном бота) или с cron-секретом
+  if (action === "stripe_setup") {
+    const cronOk = req.headers.get("x-cron-secret") === (await meta("cron_secret"));
+    const botOk = !!(await token()) && req.headers.get("x-bot-token") === (await token());
+    if (!cronOk && !botOk) return new Response("forbidden", { status: 403 });
+    try {
+      return Response.json(await stripeSetup(req.headers.get("x-stripe-key"), req.headers.get("x-stripe-price")));
+    } catch (e) {
+      return Response.json({ error: String(e) }, { status: 500 });
     }
   }
 

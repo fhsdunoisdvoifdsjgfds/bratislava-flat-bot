@@ -31,10 +31,18 @@
   const LANG_FLAG = { ru: "🇷🇺", en: "🇬🇧", sk: "🇸🇰", uk: "🇺🇦", be: "🇧🇾" };
   const MODE = { instant: "сразу", digest: "подборкой", off: "уведомления выкл." };
   const KIND = { room: "комнаты", studio: "студии", flat: "квартиры", hostel: "общежития" };
+  // статус подписки → [подпись, цвет пилюли]
+  const SUB = { trialing: ["триал", "acc"], active: ["платит", "good"], past_due: ["не оплачено", "bad"], unpaid: ["не оплачено", "bad"], canceled: ["отменил", "warn"], incomplete: ["не завершил оплату", "warn"], incomplete_expired: ["оплата не прошла", "bad"], paused: ["пауза", "warn"] };
+  const subPill = (u) => u.comp ? '<span class="pill good">бесплатно</span>' : u.sub_status ? `<span class="pill ${SUB[u.sub_status]?.[1] || ""}">${SUB[u.sub_status]?.[0] || u.sub_status}</span>` : '<span class="pill">без подписки</span>';
+  Object.assign(TYPES, {
+    subscription: ["💳", "статус подписки"], checkout_open: ["🛒", "открыл оплату"], pay_nag: ["📮", "напоминание об оплате", true],
+    sub_check: ["🔄", "проверил подписку"], comp_on: ["🎁", "получил бесплатный доступ"], comp_off: ["🔒", "лишён бесплатного доступа"],
+  });
 
   const when = (iso) => new Date(iso).toLocaleString("ru-RU", { timeZone: "Europe/Bratislava", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const dayOf = (iso) => new Date(iso).toLocaleDateString("ru-RU", { timeZone: "Europe/Bratislava", weekday: "short", day: "numeric", month: "long" });
-  const initials = (n) => (n || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  // только буквы: у «💎 Vlad» инициалы — «V», а не «?V»
+  const initials = (n) => ((n || "").match(/\p{L}+/gu) || ["?"]).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 
   function filterLine(s) {
     const { locLabel, budgetText } = A();
@@ -142,6 +150,8 @@
         ${tile("За 24 часа", k.dau, `за 7 дней — ${fmt(k.wau)}`)}
         ${tile("Уведомлений", k.notified24, "отправлено за 24 ч")}
         ${tile("Новых объявлений", k.listings24, "найдено за 24 ч")}
+        ${tile("Платят", k.paying, `в триале — ${fmt(k.trialing)}`)}
+        ${tile("Не оплатили", k.past_due, `бесплатно — ${fmt(k.comp)}`)}
       </div>
       <div class="group-title">Активные пользователи по дням</div>
       <div class="card2">${bars("users", maxU)}<div class="legend-note">Люди, которые что-то сделали в боте или приложении (без автоматических рассылок).</div></div>
@@ -167,6 +177,7 @@
             <div class="adm-un"><b>${esc(u.name || "Без имени")}</b>${u.username ? `<span class="muted">@${esc(u.username)}</span>` : ""}${u.settings.lang ? ` ${LANG_FLAG[u.settings.lang] || ""}` : ""}</div>
             <small>${esc(filterLine(u.settings))}</small>
             <div class="pills">
+              ${subPill(u)}
               ${u.active ? "" : '<span class="pill bad">заблокировал</span>'}
               ${u.onboarded ? "" : '<span class="pill warn">не настроил</span>'}
               <span class="pill">👀 ${fmt(u.views)}</span><span class="pill">❤️ ${fmt(u.favs)}</span><span class="pill">📨 ${fmt(u.notified)}</span>${u.reminders ? `<span class="pill">⏰ ${u.reminders}</span>` : ""}
@@ -259,6 +270,11 @@
         <span class="pill">с ${esc(when(u.created_at))}</span>
         ${u.last_seen_at ? `<span class="pill">был ${esc(ago(u.last_seen_at))}</span>` : ""}
       </div>
+      <div class="group" style="margin:0 0 12px">
+        <div class="cell"><span class="ic" style="background:#12a46c">💳</span><span class="lbl">Подписка<small>${u.comp ? "бесплатный доступ" : u.sub_status ? `${SUB[u.sub_status]?.[0] || u.sub_status}${u.trial_end && u.sub_status === "trialing" ? ` до ${esc(when(u.trial_end))}` : ""}${u.period_end && u.sub_status === "active" ? ` до ${esc(when(u.period_end))}` : ""}` : "не оформлена"}${u.email ? ` · ${esc(u.email)}` : ""}</small></span></div>
+        <label class="cell"><span class="ic" style="background:#ff8a3d">🎁</span><span class="lbl">Бесплатный доступ<small>без подписки, навсегда</small></span>
+          <span class="switch"><input type="checkbox" id="adm-comp" ${u.comp ? "checked" : ""}><span></span></span></label>
+      </div>
       <div class="card2" style="margin:0 0 12px"><h3>🔎 Фильтр</h3><div style="font-size:14px">${esc(filterLine(u.settings))}</div></div>
       <div class="stats" style="padding:0;margin-bottom:6px">
         <div class="stat"><small>Просмотров</small><b>${fmt(u.views)}</b></div>
@@ -273,6 +289,17 @@
       const k = e.target.closest("[data-key]");
       if (k) A().openListing(k.dataset.key);
     });
+    s.querySelector("#adm-comp").onchange = async (e) => {
+      try {
+        await api("admin_comp", { id: u.chat_id, on: e.target.checked });
+        A().toast(e.target.checked ? "Бесплатный доступ выдан" : "Бесплатный доступ снят");
+        const x = users.find((y) => Number(y.chat_id) === Number(u.chat_id));
+        if (x) x.comp = e.target.checked;
+      } catch {
+        e.target.checked = !e.target.checked;
+        A().toast("Не получилось сохранить");
+      }
+    };
   }
 
   window.FBAdmin = { open };

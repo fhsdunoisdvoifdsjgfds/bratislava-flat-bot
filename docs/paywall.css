@@ -1,0 +1,48 @@
+/* Экран подписки (paywall.js), классы fbp-* */
+.fbp-lock-scroll, .fbp-lock-scroll body { overflow: hidden; }
+.fbp {
+  position: fixed; inset: 0; z-index: 95; background: var(--bg); display: flex; flex-direction: column;
+  animation: fbp-in .35s var(--ease) both; overflow-y: auto;
+}
+.fbp.out { animation: fbp-out .3s ease-in both; }
+@keyframes fbp-in { from { opacity: 0; transform: translateY(16px); } }
+@keyframes fbp-out { to { opacity: 0; transform: translateY(16px); } }
+.fbp-hero {
+  position: relative; overflow: hidden; color: #fff; padding: 22px 22px 46px; text-align: center;
+  background: radial-gradient(130% 140% at 0% 0%, #6a5cff 0%, var(--accent) 45%, #13b5a0 120%);
+}
+.fbp-hero::before { content: ""; position: absolute; width: 240px; height: 240px; border-radius: 50%; right: -80px; top: -110px; background: rgba(255, 255, 255, .13); }
+.fbp-badge { display: inline-block; position: relative; padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; background: rgba(255, 255, 255, .2); backdrop-filter: blur(6px); }
+.fbp-lock { font-size: 54px; margin: 14px 0 4px; filter: drop-shadow(0 8px 18px rgba(0, 0, 0, .2)); animation: float 4s ease-in-out infinite; position: relative; }
+.fbp-hero h1 { font-size: 26px; line-height: 1.15; margin: 0; letter-spacing: -.02em; position: relative; }
+.fbp-hero p { margin: 8px auto 0; max-width: 340px; opacity: .9; font-size: 14.5px; line-height: 1.4; position: relative; }
+.fbp-body { margin-top: -26px; background: var(--bg); border-radius: 26px 26px 0 0; position: relative; padding: 20px 18px 8px; flex: 1; }
+.fbp-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 10px; }
+.fbp-list li { font-size: 15px; font-weight: 560; padding: 12px 14px; border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+.fbp-plan { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+.fbp-plan.one { grid-template-columns: 1fr; }
+.fbp-plan div { background: var(--surface); border-radius: 16px; padding: 12px 14px; box-shadow: 0 0 0 1.5px var(--line) inset; }
+.fbp-plan div:first-child { box-shadow: 0 0 0 2px var(--good) inset; background: var(--good-soft); }
+.fbp-plan.one div:first-child { box-shadow: 0 0 0 2px var(--accent) inset; background: var(--accent-soft); }
+.fbp-plan span { display: block; font-size: 12.5px; color: var(--hint); font-weight: 600; }
+.fbp-plan b { font-size: 22px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.fbp-plan small { font-size: 13px; color: var(--hint); font-weight: 600; }
+.fbp-email { display: block; }
+.fbp-email span { display: block; font-size: 13px; font-weight: 650; color: var(--hint); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+.fbp-email input { width: 100%; height: 50px; border-radius: 14px; border: 0; padding: 0 14px; font-size: 16px; background: var(--surface); box-shadow: 0 0 0 1.5px var(--line) inset; outline: none; }
+.fbp-email input:focus { box-shadow: 0 0 0 2px var(--accent) inset; }
+.fbp-email input.bad { box-shadow: 0 0 0 2px var(--bad) inset; }
+.fbp-email small { display: block; color: var(--hint); font-size: 12.5px; margin-top: 6px; }
+.fbp-note { color: var(--hint); font-size: 12.5px; line-height: 1.45; margin: 14px 2px 0; }
+.fbp-foot { position: sticky; bottom: 0; padding: 10px 18px calc(12px + var(--safe-b)); background: var(--bg); display: grid; gap: 6px; }
+.fbp-cta {
+  height: 56px; border-radius: 16px; font-size: 17px; font-weight: 700; color: #fff; display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: linear-gradient(135deg, #12a46c, #0f8f5f); box-shadow: 0 8px 24px rgba(18, 164, 108, .35); transition: transform .15s var(--ease), opacity .2s;
+}
+.fbp-cta:active { transform: scale(.98); }
+.fbp-cta[disabled] { opacity: .75; }
+.fbp-check { height: 40px; color: var(--link); font-weight: 650; font-size: 14px; }
+.fbp-ok { height: 56px; border-radius: 16px; display: grid; place-items: center; font-size: 17px; font-weight: 700; background: var(--good-soft); color: var(--good); }
+.fbp-spin { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid rgba(255, 255, 255, .4); border-top-color: #fff; animation: fbp-rot .8s linear infinite; }
+@keyframes fbp-rot { to { transform: rotate(360deg); } }
+@media (min-width: 640px) { .fbp > * { width: 100%; max-width: 560px; margin-left: auto; margin-right: auto; } }

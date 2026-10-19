@@ -1,0 +1,24 @@
+name: stripe-setup
+
+# Подключение Stripe: передаёт секретный ключ и ID цены из секретов GitHub в облачную
+# функцию, создаёт в Stripe вебхук и сохраняет его секрет. Запускать вручную:
+# Actions → stripe-setup → Run workflow (после `gh secret set STRIPE_SECRET_KEY` и `STRIPE_PRICE_ID`).
+on:
+  workflow_dispatch: {}
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: connect Stripe
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PRICE_ID: ${{ secrets.STRIPE_PRICE_ID }}
+        run: |
+          curl -sS --fail-with-body --max-time 60 -X POST \
+            "https://nnkhlnzjkwtcjvzyubzc.supabase.co/functions/v1/flat-bot?action=stripe_setup" \
+            -H "x-bot-token: $TELEGRAM_BOT_TOKEN" \
+            -H "x-stripe-key: $STRIPE_SECRET_KEY" \
+            -H "x-stripe-price: $STRIPE_PRICE_ID" | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps({k: d.get(k) for k in ('ok','error','livemode','price')}, ensure_ascii=False))"

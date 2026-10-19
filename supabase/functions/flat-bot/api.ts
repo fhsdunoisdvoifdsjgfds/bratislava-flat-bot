@@ -104,6 +104,13 @@ function orderBy(sort: string) {
   }
 }
 
+// подписка: без доступа отдаём только количество (для онбординга), но не сами объявления
+async function locked(user: User | null) {
+  const { cfg, accessOf } = await import("./stripe.ts");
+  if (!(await cfg()).enabled) return false;
+  return !user || !(await accessOf(user.id)).ok;
+}
+
 async function feed(body: any, user: User | null) {
   const f: Filters = body.filters ?? {};
   const limit = Math.min(Number(body.limit ?? 24), 60);
@@ -118,10 +125,13 @@ async function feed(body: any, user: User | null) {
     where ${where(f, user)}
     ${orderBy(body.sort ?? "new")}
     limit ${limit} offset ${offset}`;
-  return { items, total: Number(items[0]?.total_count ?? 0) };
+  const total = Number(items[0]?.total_count ?? 0);
+  if (await locked(user)) return { items: [], total, paywall: true };
+  return { items, total };
 }
 
 async function mapPoints(body: any, user: User | null) {
+  if (await locked(user)) return { points: [], paywall: true };
   const points = await sql`
     select l.key, l.lat, l.lng, coalesce(l.total, l.price) as total, l.kind
     from flatbot.listings l
@@ -132,6 +142,7 @@ async function mapPoints(body: any, user: User | null) {
 
 async function listing(body: any, user: User | null) {
   const key = String(body.key ?? "");
+  if (await locked(user)) return { error: "paywall" };
   if (user && !body.peek) await logEvent(user.id, "view", { key });
   const [l] = await sql`
     with ${MEDIANS}
@@ -238,7 +249,10 @@ async function bootstrap(user: User | null, body: any = {}) {
     const [recent] = await sql`select 1 from flatbot.events where chat_id = ${user.id} and type = 'app_open'
                                and created_at > now() - interval '30 minutes' limit 1`;
     if (!recent) await logEvent(user.id, "app_open", { platform: body?.platform ?? null });
+    const { accessOf, priceInfo } = await import("./stripe.ts");
     me = {
+      access: await accessOf(user.id),
+      price: await priceInfo().catch(() => null),
       isAdmin: await isAdmin(user.id),
       id: user.id,
       name,
@@ -370,6 +384,32 @@ export async function handleApi(body: any) {
       const { sendSetup } = await import("./notify.ts");
       await sendSetup(u.id, settingsOf(row?.settings), "test");
       await logEvent(u.id, "notify_test");
+      return { ok: true };
+    }
+    case "pay": {
+      const u = need();
+      const { payLink, validEmail } = await import("./stripe.ts");
+      if (body.email != null) {
+        if (!validEmail(body.email)) return { error: "bad_email" };
+        await sql`update flatbot.subscribers set email = ${String(body.email).trim().toLowerCase()} where chat_id = ${u.id}`;
+      }
+      return { url: await payLink(u.id) };
+    }
+    case "sub_check": {
+      const u = need();
+      const { syncSubscription } = await import("./stripe.ts");
+      return { access: await syncSubscription(u.id) };
+    }
+    case "access": {
+      const u = need();
+      const { accessOf } = await import("./stripe.ts");
+      return { access: await accessOf(u.id) };
+    }
+    case "admin_comp": {
+      const u = need();
+      if (!(await isAdmin(u.id))) throw new Response(JSON.stringify({ error: "forbidden" }), { status: 403 });
+      await sql`update flatbot.subscribers set comp = ${!!body.on} where chat_id = ${Number(body.id)}`;
+      await logEvent(Number(body.id), body.on ? "comp_on" : "comp_off", { by: u.id });
       return { ok: true };
     }
     case "admin_overview":
