@@ -116,6 +116,7 @@
     ov.className = "fbp";
     ov.innerHTML = `
       <div class="fbp-hero">
+        ${closable ? `<button class="fbp-x" aria-label="${esc(t.later)}">✕</button>` : ""}
         <span class="fbp-badge">${esc(blocked ? "⚠️" : ended ? "⛔️" : "🎁")} ${esc(blocked ? t.pastDue : ended ? t.canceled : trial ? t.badge : t.row)}</span>
         <div class="fbp-lock">🔓</div>
         <h1>${esc(blocked ? t.pastDue : ended ? t.canceled : limitHit ? t.limitT : t.title)}</h1>
@@ -198,7 +199,9 @@
         }
       };
       checkBtn.onclick = () => (haptic(), check(false));
-      const later = ov.querySelector(".fbp-later");
+      const closeBtns = ov.querySelectorAll(".fbp-later, .fbp-x");
+      const later = closeBtns.length ? {} : null;
+      closeBtns.forEach((b) => (b.onclick = () => later.onclick()));
       if (later) later.onclick = () => {
         haptic();
         clearInterval(poll);

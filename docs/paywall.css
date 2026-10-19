@@ -53,3 +53,7 @@
 .fbp-banner { margin: 8px 16px 4px; padding: 12px 14px; border-radius: 16px; display: flex; gap: 10px; align-items: center; justify-content: space-between;
   background: linear-gradient(135deg, color-mix(in srgb, #12a46c 16%, var(--surface)), var(--surface)); box-shadow: 0 0 0 1.5px color-mix(in srgb, #12a46c 35%, transparent) inset; font-size: 13.5px; font-weight: 600; }
 .fbp-banner button { flex: none; height: 36px; padding: 0 12px; border-radius: 11px; background: #12a46c; color: #fff; font-weight: 700; font-size: 13px; }
+
+.fbp-x { position: absolute; right: 14px; top: 14px; z-index: 2; width: 38px; height: 38px; border-radius: 50%;
+  background: rgba(255, 255, 255, .22); color: #fff; font-size: 17px; font-weight: 700; backdrop-filter: blur(6px); }
+.fbp-x:active { transform: scale(.92); }

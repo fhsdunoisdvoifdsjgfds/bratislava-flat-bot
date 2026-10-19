@@ -9,7 +9,7 @@ import { esc, say, SELF_URL, tg, token } from "./tg.ts";
 export const ACCESS_STATUSES = ["trialing", "active"];
 const BLOCKED_STATUSES = ["past_due", "unpaid", "canceled", "incomplete_expired", "paused"];
 const TRIAL_DAYS = 7;
-export const FREE_VIEWS = 5; // столько объявлений можно открыть без подписки
+export const FREE_VIEWS = 10; // столько объявлений можно открыть без подписки
 
 // почта для проверки «триал уже был»: регистр, точки и +метки у Gmail не делают её новой
 export function normEmail(e: string) {
