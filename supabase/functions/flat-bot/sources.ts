@@ -39,6 +39,7 @@ export type Listing = {
   availableFrom: string | null; // YYYY-MM-DD
   tags: string[];
   detailed: boolean;
+  shortTerm?: boolean; // посуточно, отпуск, спа — такие не показываем
 };
 
 export const key = (l: Pick<Listing, "source" | "id">) => `${l.source}:${l.id}`;
@@ -209,8 +210,30 @@ function classifyAgency(l: Listing): boolean | null {
   return score <= -1 ? false : null;
 }
 
+// Посуточная/краткосрочная аренда и отдых: «50 €/noc», «na dovolenku», «wellness», «chata v Tatrách»
+const SHORT_STRONG =
+  /(€|eur)\s*\/?\s*(za\s+)?(noc|nocu|osobu\s*\/\s*noc|den|deň)\b|\/\s*noc\b|\bza\s+noc\b|\bna\s+noc\b|\bnocl\w*|prenocovan|\bper\s+night\b|\bnightly\b|airbnb|booking\.com|na\s+hodiny|hodinov\w*\s+prenaj|\bdovolenk|\brekreac|\bwellness|\bkupele\b|\bkupeloch\b|\bkupeln\w*\s+(pobyt|mest)|\btermal|\bspa\b|chalup|\bchat[ayu]\b|\bzrub|\bvikendov|ubytovanie\s+v\s+sukromi|turistick\w*\s+ubytovan|\bpenzion|apartman\w*\s+(pri\s+mori|v\s+tatrach|pri\s+jazere)|\bsvadb|\boslav[aeuy]\b|teambuilding/;
+// не жильё: офисы, склады, гаражи, торговые помещения (только по заголовку)
+const NON_RESIDENTIAL =
+  /nebytov|obchodn\w*\s+priestor|kancelar|\bsklad|\bgaraz|parkovac\w*\s+miest|masazn|ordinaci|prevadzk|komercn/;
+const SHORT_SOFT = /kratkodob|short[-\s]?term|na\s+par\s+dni|na\s+(1|jeden|2|dva)\s+(den|dni|noc)/;
+
+function isShortTerm(l: Listing) {
+  const head = fold(l.title);
+  const f = fold(`${l.title}\n${l.text}`);
+  if (SHORT_STRONG.test(head)) return true;
+  // «byt s garážou» — это квартира; нежильё — только если о жилье в заголовке ни слова
+  const housing = /\bbyt|\bbyty|\bizb|garson|garzon|\bgar\.|apartman|\bstudio|\bdom\b|\bbyvan|\blozk|ubytovan|\bflat|\broom/;
+  if (NON_RESIDENTIAL.test(head) && !housing.test(head)) return true;
+  // в тексте: сильный признак, если не сказано, что это долгосрочно
+  if (SHORT_STRONG.test(f) && !/dlhodob|long[-\s]?term|na\s+dlhsi\s+cas|minimalne\s+(na\s+)?\d+\s+mesia/.test(f)) return true;
+  if (SHORT_SOFT.test(f) && !/dlhodob|long[-\s]?term/.test(f)) return true;
+  return false;
+}
+
 function parseText(l: Listing) {
   const f = fold(`${l.title}\n${l.text}`);
+  if (!l.shortTerm) l.shortTerm = isShortTerm(l);
 
   if (l.utilities === "unknown") {
     if (RE_EXTRA.test(f)) l.utilities = "extra";
@@ -495,6 +518,7 @@ export function bezrealitky(pageList = [1]) {
       l.lng = v.gps?.lng ?? null;
       l.agency = false;
       l.commission = false;
+      l.shortTerm = !!v.shortTerm;
       l.seller = "Владелец (bezrealitky)";
       const disp = String(v.disposition ?? "");
       const r = disp.match(/DISP_(\d)/);

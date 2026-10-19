@@ -85,7 +85,8 @@ async function check() {
     (await sql`select key, kind from flatbot.listings where key = any(${keys}::text[])`).map((r: any) => [r.key, r.kind]),
   );
   await sql`update flatbot.listings set last_seen = now() where key = any(${keys}::text[])`;
-  const fresh = listings.filter((l) => !existing.has(S.key(l)));
+  // посуточное/отпуск/спа и цены ниже 150 € не сохраняем и не рассылаем
+  const fresh = listings.filter((l) => !existing.has(S.key(l)) && !l.shortTerm);
   const legacy = listings.filter((l) => existing.has(S.key(l)) && existing.get(S.key(l)) == null);
   const ready = !!(await meta("v2_ready"));
 

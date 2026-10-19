@@ -59,6 +59,7 @@ function where(f: Filters, user: User | null) {
     l.kind is not null and l.posted_at > now() - interval '30 days'
     and l.kind = any(${kinds}::text[])
     and l.price >= ${MIN_PRICE}::int and l.total between ${min}::int and ${max}::int
+    and not coalesce((l.data->>'shortTerm')::boolean, false)
     ${f.agency === "private" ? sql`and l.agency is false` : sql``}
     ${f.agency === "agency" ? sql`and l.agency is true` : sql``}
     ${anyLoc ? sql`and (l.region = any(${regions}::text[]) or l.city = any(${cities}::text[]) or l.district = any(${districts}::text[]))` : sql``}
@@ -73,11 +74,11 @@ function where(f: Filters, user: User | null) {
 const MEDIANS = sql`
   med_d as (
     select kind, city, percentile_cont(0.5) within group (order by total) m, count(*) n
-    from flatbot.listings where kind is not null and price >= 100 and total >= 100 and posted_at > now() - interval '30 days'
+    from flatbot.listings where kind is not null and price >= 150 and total >= 150 and posted_at > now() - interval '30 days'
     group by kind, city),
   med_k as (
     select kind, percentile_cont(0.5) within group (order by total) m, count(*) n
-    from flatbot.listings where kind is not null and price >= 100 and total >= 100 and posted_at > now() - interval '30 days'
+    from flatbot.listings where kind is not null and price >= 150 and total >= 150 and posted_at > now() - interval '30 days'
     group by kind)`;
 
 const COMPACT = sql`
@@ -180,24 +181,24 @@ async function listing(body: any, user: User | null) {
 async function stats() {
   const [byCity, byKind, bySource, perDay, [totals]] = await Promise.all([
     sql`select city, max(data->>'cityName') as city_name, percentile_cont(0.5) within group (order by total) as median, count(*)::int as n
-        from flatbot.listings where kind is not null and price >= 100 and total >= 100 and posted_at > now() - interval '30 days'
+        from flatbot.listings where kind is not null and price >= 150 and total >= 150 and posted_at > now() - interval '30 days'
           and kind in ('flat', 'studio') and city is not null
         group by city having count(*) >= 5 order by n desc limit 15`,
     sql`select kind, percentile_cont(0.5) within group (order by total) as median,
           min(total) as min, count(*)::int as n
-        from flatbot.listings where kind is not null and price >= 100 and total >= 100 and posted_at > now() - interval '30 days'
+        from flatbot.listings where kind is not null and price >= 150 and total >= 150 and posted_at > now() - interval '30 days'
         group by kind`,
     sql`select source, count(*)::int as n from flatbot.listings
-        where kind is not null and price >= 100 and posted_at > now() - interval '30 days' group by source order by n desc`,
+        where kind is not null and price >= 150 and posted_at > now() - interval '30 days' group by source order by n desc`,
     sql`select (posted_at at time zone 'Europe/Bratislava')::date as day, count(*)::int as n
-        from flatbot.listings where kind is not null and price >= 100 and posted_at > now() - interval '14 days'
+        from flatbot.listings where kind is not null and price >= 150 and posted_at > now() - interval '14 days'
           and not (seeded and published is null) -- у массово подгруженных без даты время неизвестно
         group by 1 order by 1`,
     sql`select count(*)::int as total,
           count(*) filter (where posted_at > now() - interval '24 hours')::int as new24,
           count(*) filter (where agency is false)::int as private,
           count(*) filter (where has_phone)::int as with_phone
-        from flatbot.listings where kind is not null and price >= 100 and posted_at > now() - interval '30 days'`,
+        from flatbot.listings where kind is not null and price >= 150 and posted_at > now() - interval '30 days'`,
   ]);
   for (const c of byCity) c.city_name = G.townByKey.get(c.city)?.name ?? c.city_name ?? c.city;
   byCity.sort((a: any, b: any) => a.median - b.median);
@@ -207,11 +208,11 @@ async function stats() {
 async function bootstrap(user: User | null) {
   const [regionRows, cityRows, districtRows] = await Promise.all([
     sql`select region, count(*)::int as n from flatbot.listings
-        where kind is not null and price >= 100 and posted_at > now() - interval '30 days' and region is not null group by region`,
+        where kind is not null and price >= 150 and posted_at > now() - interval '30 days' and region is not null group by region`,
     sql`select city, max(region) as region, max(data->>'cityName') as name, count(*)::int as n from flatbot.listings
-        where kind is not null and price >= 100 and posted_at > now() - interval '30 days' and city is not null group by city`,
+        where kind is not null and price >= 150 and posted_at > now() - interval '30 days' and city is not null group by city`,
     sql`select district, count(*)::int as n from flatbot.listings
-        where kind is not null and price >= 100 and posted_at > now() - interval '30 days' and district is not null group by district`,
+        where kind is not null and price >= 150 and posted_at > now() - interval '30 days' and district is not null group by district`,
   ]);
   const rc = Object.fromEntries(regionRows.map((r: any) => [r.region, r.n]));
   const dc = Object.fromEntries(districtRows.map((r: any) => [r.district, r.n]));
