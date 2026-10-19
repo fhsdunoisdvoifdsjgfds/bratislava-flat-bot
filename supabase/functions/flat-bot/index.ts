@@ -1,4 +1,4 @@
-// Telegram-бот и API мини-приложения: квартиры и комнаты в Братиславе.
+// Telegram-бот и API мини-приложения: квартиры и комнаты по всей Словакии.
 //
 //  POST + X-Telegram-Bot-Api-Secret-Token   — вебхук Telegram (/start, /today, /app, /status, /stop)
 //  POST ?action=api                          — API мини-приложения (см. api.ts)
@@ -11,12 +11,11 @@
 import { handleApi } from "./api.ts";
 import { matches, meta, saveDetailed, setMeta, settingsOf, sql, upsertListings } from "./db.ts";
 import type { Settings } from "./db.ts";
+import * as G from "./geo.ts";
 import * as S from "./sources.ts";
 import type { Listing } from "./sources.ts";
 import { APP_URL, esc, say, SELF_URL, sendDigest, sendListing, setToken, sleep, tg, token } from "./tg.ts";
 
-const SCRAPE_MAX = 800; // с сайтов берём до 800 €, бюджет каждый задаёт сам
-const RADIUS_KM = 25; // bazos: Братислава + ближайшие города
 
 // ---------------------------------------------------------------- время по Братиславе
 const hm = (d = new Date()) =>
@@ -72,12 +71,14 @@ async function enrich(ls: Listing[], limit: number, workers = 4) {
 }
 
 async function check() {
+  // вся Словакия: свежие страницы каждого сайта (у nehnutelnosti — по каждому краю)
   const { listings, stats } = await collect({
-    "bazos (квартиры)": () => S.bazos("byt", SCRAPE_MAX, RADIUS_KM),
-    "bazos (комнаты)": () => S.bazos("podnajom", SCRAPE_MAX, RADIUS_KM),
-    "nehnutelnosti.sk": () => S.nehnutelnosti(SCRAPE_MAX),
-    "topreality.sk": () => S.topreality(SCRAPE_MAX),
-    "bezrealitky.sk": () => S.bezrealitky(),
+    "bazos (квартиры)": () => S.bazos("byt", [0, 20, 40]),
+    "bazos (комнаты)": () => S.bazos("podnajom", [0, 20]),
+    "nehnutelnosti.sk": async () =>
+      (await Promise.all(G.REGIONS.map((r) => S.nehnutelnosti(r.key).catch(() => [] as Listing[])))).flat(),
+    "topreality.sk": () => S.topreality([1, 2]),
+    "bezrealitky.sk": () => S.bezrealitky([1, 2]),
   });
   const keys = listings.map(S.key);
   const existing = new Map<string, string | null>(
@@ -89,7 +90,7 @@ async function check() {
   const ready = !!(await meta("v2_ready"));
 
   // новые дочитываем сразу: фото, полный текст, телефон — до рассылки
-  await enrich(fresh, 16);
+  await enrich(fresh, 30, 6);
   await upsertListings(fresh, !ready);
   await upsertListings(legacy, true);
 
@@ -125,13 +126,14 @@ async function backfill(src: string) {
   const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
   const jobs: Record<string, () => Promise<Listing[]>> = {
     bazos: async () => [
-      ...(await S.bazos("byt", SCRAPE_MAX, RADIUS_KM, [0, 20, 40, 60, 80, 100])),
-      ...(await S.bazos("podnajom", SCRAPE_MAX, RADIUS_KM, [0, 20, 40, 60])),
+      ...(await S.bazos("byt", range(0, 9).map((i) => i * 20))),
+      ...(await S.bazos("podnajom", range(0, 5).map((i) => i * 20))),
     ],
-    nehnutelnosti: () => S.nehnutelnosti(SCRAPE_MAX, range(1, 8)),
-    topreality: () => S.topreality(SCRAPE_MAX, range(1, 5)),
-    bezrealitky: () => S.bezrealitky(range(1, 4)),
+    topreality: () => S.topreality(range(1, 8)),
+    bezrealitky: () => S.bezrealitky(range(1, 6)),
   };
+  // nehnutelnosti — отдельным вызовом на каждый край: ?src=nehnutelnosti-KE
+  for (const r of G.REGIONS) jobs[`nehnutelnosti-${r.key}`] = () => S.nehnutelnosti(r.key, range(1, 5));
   if (!jobs[src]) return { error: "unknown src" };
   const { listings, stats } = await collect({ [src]: jobs[src] });
   await upsertListings(listings, true);
@@ -195,12 +197,21 @@ async function tick() {
     }
   }
 
-  // 3) потихоньку дочитываем карточки, которые ещё не открывали
+  // 3) продавец на Bazoši с 3+ разными объявлениями и «фирменным» именем — агентство
+  await sql`
+    update flatbot.listings set agency = true, data = jsonb_set(data, '{agency}', 'true')
+    where source = 'bazos' and agency is not true and data->>'seller' in (
+      select data->>'seller' from flatbot.listings
+      where source = 'bazos' and data->>'seller' is not null and length(data->>'seller') >= 6
+        and data->>'seller' !~ '^[[:upper:]][[:lower:]]+( [[:upper:]][[:lower:]]+)?$'
+      group by 1 having count(distinct data->>'title') >= 3)`;
+
+  // 4) потихоньку дочитываем карточки, которые ещё не открывали
   const todo = await sql`
     select data from flatbot.listings where not detailed and kind is not null
-    order by posted_at desc limit 6`;
+    order by posted_at desc limit 10`;
   const ls = todo.map((r: any) => r.data as Listing);
-  await enrich(ls, 6, 3);
+  await enrich(ls, 10, 5);
   for (const l of ls) {
     l.detailed = true; // даже если сайт не ответил — не пытаемся бесконечно
     await saveDetailed(l);
@@ -234,9 +245,9 @@ async function sendToday(chat_id: number, limit: number) {
 }
 
 const HELP =
-  "Я ищу квартиры и комнаты в Братиславе и окрестностях на bazos.sk, nehnutelnosti.sk (+reality.sk, byty.sk), " +
+  "Я ищу квартиры и комнаты по всей Словакии на bazos.sk, nehnutelnosti.sk (+reality.sk, byty.sk), " +
   "topreality.sk и bezrealitky.sk и присылаю новые объявления в течение 10 минут.\n\n" +
-  "В приложении: фильтры по районам, бюджету и агентствам, карта, избранное, напоминания и настройка уведомлений.\n\n" +
+  "В приложении: выбор городов и районов, бюджет, агентство или частник, карта, избранное, напоминания и настройка уведомлений.\n\n" +
   "/today — объявления за сутки\n/app — открыть приложение\n/status — последняя проверка\n/stop — отписаться";
 
 async function handleUpdate(u: any) {
@@ -287,11 +298,11 @@ async function configure() {
     ],
   });
   await tg("setMyShortDescription", {
-    short_description: "Новые квартиры и комнаты в Братиславе за 10 минут: 4 сайта, фильтры, карта, напоминания.",
+    short_description: "Новые квартиры и комнаты по всей Словакии за 10 минут: 4 сайта, любые города, карта, напоминания.",
   });
   await tg("setMyDescription", {
     description:
-      "Ищу аренду в Братиславе и окрестностях на bazos, nehnutelnosti, topreality и bezrealitky. " +
+      "Ищу аренду по всей Словакии — Bratislava, Košice, Žilina, Nitra и любые другие города — на bazos, nehnutelnosti, topreality и bezrealitky. " +
       "Присылаю новые объявления в течение 10 минут, с телефоном и кнопкой звонка. Нажмите «Старт».",
   });
   return { ok: true };

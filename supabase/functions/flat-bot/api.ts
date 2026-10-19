@@ -1,7 +1,8 @@
 // API для Telegram Mini App. Публичные операции (лента, карточка, статистика)
 // работают без авторизации; личные (настройки, избранное, напоминания) требуют
 // подписанный Telegram initData.
-import { DEFAULT_SETTINGS, meta, settingsOf, sql } from "./db.ts";
+import { DEFAULT_SETTINGS, meta, NO_LIMIT, settingsOf, sql } from "./db.ts";
+import * as G from "./geo.ts";
 import * as S from "./sources.ts";
 import { token } from "./tg.ts";
 
@@ -38,6 +39,8 @@ type Filters = {
   minTotal?: number;
   maxTotal?: number;
   agency?: "any" | "private" | "agency";
+  regions?: string[];
+  cities?: string[];
   districts?: string[];
   withPhone?: boolean;
   withPhoto?: boolean;
@@ -48,15 +51,17 @@ type Filters = {
 function where(f: Filters, user: User | null) {
   const kinds = f.kinds?.length ? f.kinds : DEFAULT_SETTINGS.kinds;
   const min = Number(f.minTotal ?? 0);
-  const max = Number(f.maxTotal ?? 2000);
+  const max = Number(f.maxTotal ?? NO_LIMIT) >= NO_LIMIT ? 1_000_000 : Number(f.maxTotal);
+  const regions = f.regions ?? [], cities = f.cities ?? [], districts = f.districts ?? [];
+  const anyLoc = regions.length || cities.length || districts.length;
   const q = (f.q ?? "").trim().slice(0, 60);
   return sql`
     l.kind is not null and l.posted_at > now() - interval '30 days'
     and l.kind = any(${kinds}::text[])
     and (coalesce(l.total, l.price) is null or coalesce(l.total, l.price) between ${min}::int and ${max}::int)
-    ${f.agency === "private" ? sql`and l.agency is distinct from true` : sql``}
+    ${f.agency === "private" ? sql`and l.agency is false` : sql``}
     ${f.agency === "agency" ? sql`and l.agency is true` : sql``}
-    ${f.districts?.length ? sql`and l.district = any(${f.districts}::text[])` : sql``}
+    ${anyLoc ? sql`and (l.region = any(${regions}::text[]) or l.city = any(${cities}::text[]) or l.district = any(${districts}::text[]))` : sql``}
     ${f.withPhone ? sql`and l.has_phone` : sql``}
     ${f.withPhoto ? sql`and l.has_photo` : sql``}
     ${f.onlyNew ? sql`and l.posted_at > now() - interval '24 hours'` : sql``}
@@ -67,16 +72,16 @@ function where(f: Filters, user: User | null) {
 // медианы «итого» по типу и району за 30 дней — основа для «дешевле рынка на N%»
 const MEDIANS = sql`
   med_d as (
-    select kind, district, percentile_cont(0.5) within group (order by total) m, count(*) n
+    select kind, city, percentile_cont(0.5) within group (order by total) m, count(*) n
     from flatbot.listings where kind is not null and total >= 80 and posted_at > now() - interval '30 days'
-    group by kind, district),
+    group by kind, city),
   med_k as (
     select kind, percentile_cont(0.5) within group (order by total) m, count(*) n
     from flatbot.listings where kind is not null and total >= 80 and posted_at > now() - interval '30 days'
     group by kind)`;
 
 const COMPACT = sql`
-  l.key, l.source, l.kind, l.district, l.agency, l.price, l.total, l.area, l.lat, l.lng,
+  l.key, l.source, l.kind, l.region, l.city, l.data->>'cityName' as city_name, l.district, l.agency, l.price, l.total, l.area, l.lat, l.lng,
   l.has_phone, l.posted_at, l.detailed, l.seeded, l.published,
   l.data->>'title' as title, l.data->>'utilities' as utilities, (l.data->>'charges')::int as charges,
   (l.data->>'rooms')::float as rooms, l.data->>'seller' as seller, (l.data->>'commission')::boolean as commission,
@@ -107,7 +112,7 @@ async function feed(body: any, user: User | null) {
     select ${COMPACT}, count(*) over () as total_count
       ${user ? sql`, exists (select 1 from flatbot.favorites v where v.chat_id = ${user.id} and v.key = l.key) as fav` : sql``}
     from flatbot.listings l
-    left join med_d md on md.kind = l.kind and md.district is not distinct from l.district
+    left join med_d md on md.kind = l.kind and md.city is not distinct from l.city
     left join med_k mk on mk.kind = l.kind
     where ${where(f, user)}
     ${orderBy(body.sort ?? "new")}
@@ -131,10 +136,10 @@ async function listing(body: any, user: User | null) {
     select l.data, l.posted_at, l.first_seen, l.total, l.seeded,
       coalesce(case when md.n >= 4 then md.m end, mk.m) as median,
       case when md.n >= 4 then md.n else mk.n end as median_n,
-      case when md.n >= 4 then 'district' else 'kind' end as median_scope
+      case when md.n >= 4 then 'city' else 'kind' end as median_scope
       ${user ? sql`, exists (select 1 from flatbot.favorites v where v.chat_id = ${user.id} and v.key = l.key) as fav` : sql``}
     from flatbot.listings l
-    left join med_d md on md.kind = l.kind and md.district is not distinct from l.district
+    left join med_d md on md.kind = l.kind and md.city is not distinct from l.city
     left join med_k mk on mk.kind = l.kind
     where l.key = ${key}`;
   if (!l) return { error: "not_found" };
@@ -152,10 +157,10 @@ async function listing(body: any, user: User | null) {
     with ${MEDIANS}
     select ${COMPACT}
     from flatbot.listings l
-    left join med_d md on md.kind = l.kind and md.district is not distinct from l.district
+    left join med_d md on md.kind = l.kind and md.city is not distinct from l.city
     left join med_k mk on mk.kind = l.kind
     where l.kind = ${l.data.kind} and l.key <> ${key} and l.posted_at > now() - interval '30 days'
-      and ${l.data.district ? sql`l.district = ${l.data.district}` : sql`true`}
+      and ${l.data.district ? sql`l.district = ${l.data.district}` : l.data.city ? sql`l.city = ${l.data.city}` : sql`true`}
       and abs(coalesce(l.total, l.price, 0) - ${Number(l.total ?? l.data.price ?? 0)}::int) < 150
     order by l.posted_at desc limit 6`;
   const reminders = user
@@ -173,11 +178,11 @@ async function listing(body: any, user: User | null) {
 }
 
 async function stats() {
-  const [byDistrict, byKind, bySource, perDay, [totals]] = await Promise.all([
-    sql`select district, percentile_cont(0.5) within group (order by total) as median, count(*)::int as n
+  const [byCity, byKind, bySource, perDay, [totals]] = await Promise.all([
+    sql`select city, max(data->>'cityName') as city_name, percentile_cont(0.5) within group (order by total) as median, count(*)::int as n
         from flatbot.listings where kind is not null and total >= 80 and posted_at > now() - interval '30 days'
-          and kind in ('flat', 'studio') and district is not null
-        group by district having count(*) >= 3 order by median`,
+          and kind in ('flat', 'studio') and city is not null
+        group by city having count(*) >= 5 order by n desc limit 15`,
     sql`select kind, percentile_cont(0.5) within group (order by total) as median,
           min(total) as min, count(*)::int as n
         from flatbot.listings where kind is not null and total >= 80 and posted_at > now() - interval '30 days'
@@ -194,14 +199,29 @@ async function stats() {
           count(*) filter (where has_phone)::int as with_phone
         from flatbot.listings where kind is not null and posted_at > now() - interval '30 days'`,
   ]);
-  return { byDistrict, byKind, bySource, perDay, totals };
+  for (const c of byCity) c.city_name = G.townByKey.get(c.city)?.name ?? c.city_name ?? c.city;
+  byCity.sort((a: any, b: any) => a.median - b.median);
+  return { byCity, byKind, bySource, perDay, totals };
 }
 
 async function bootstrap(user: User | null) {
-  const districtCounts = await sql`
-    select district, count(*)::int as n from flatbot.listings
-    where kind is not null and posted_at > now() - interval '30 days' group by district`;
-  const counts = Object.fromEntries(districtCounts.map((r: any) => [r.district ?? "", r.n]));
+  const [regionRows, cityRows, districtRows] = await Promise.all([
+    sql`select region, count(*)::int as n from flatbot.listings
+        where kind is not null and posted_at > now() - interval '30 days' and region is not null group by region`,
+    sql`select city, max(region) as region, max(data->>'cityName') as name, count(*)::int as n from flatbot.listings
+        where kind is not null and posted_at > now() - interval '30 days' and city is not null group by city`,
+    sql`select district, count(*)::int as n from flatbot.listings
+        where kind is not null and posted_at > now() - interval '30 days' and district is not null group by district`,
+  ]);
+  const rc = Object.fromEntries(regionRows.map((r: any) => [r.region, r.n]));
+  const dc = Object.fromEntries(districtRows.map((r: any) => [r.district, r.n]));
+  // города: все известные из справочника + деревни, где сейчас есть объявления
+  const cities = new Map<string, any>(G.TOWNS.map((t) => [t.key, { key: t.key, name: t.name, region: t.region, n: 0 }]));
+  for (const r of cityRows) {
+    const c = cities.get(r.city) ?? { key: r.city, name: r.name ?? r.city, region: r.region, n: 0 };
+    c.n = r.n;
+    cities.set(r.city, c);
+  }
   const lastCheck = await meta("last_check");
   let me: any = null;
   if (user) {
@@ -226,7 +246,9 @@ async function bootstrap(user: User | null) {
   return {
     me,
     defaults: DEFAULT_SETTINGS,
-    districts: S.DISTRICTS.map(([k, name, group]) => ({ key: k, name, group, n: counts[k] ?? 0 })),
+    regions: G.REGIONS.map((r) => ({ key: r.key, name: r.name, n: rc[r.key] ?? 0 })),
+    cities: [...cities.values()].filter((c) => c.n > 0 || G.townByKey.has(c.key)).sort((a, b) => b.n - a.n),
+    districts: G.DISTRICTS.map(([k, name, city]) => ({ key: k, name, city, n: dc[k] ?? 0 })),
     lastCheck: lastCheck ? { at: lastCheck.at, stats: lastCheck.stats } : null,
   };
 }
@@ -239,9 +261,11 @@ function cleanSettings(raw: any) {
     ...s,
     kinds: kinds.length ? kinds : DEFAULT_SETTINGS.kinds,
     minTotal: Math.max(0, Math.min(2000, Number(s.minTotal) || 0)),
-    maxTotal: Math.max(50, Math.min(2000, Number(s.maxTotal) || 650)),
+    maxTotal: Math.max(50, Math.min(NO_LIMIT, Number(s.maxTotal) || 650)),
     agency: ["any", "private", "agency"].includes(s.agency) ? s.agency : "any",
-    districts: s.districts.filter((d) => S.DISTRICTS.some((x) => x[0] === d)),
+    regions: (s.regions ?? []).filter((r) => G.REGIONS.some((x) => x.key === r)),
+    cities: (s.cities ?? []).filter((c) => /^[a-z0-9-]{2,60}$/.test(c)).slice(0, 60),
+    districts: (s.districts ?? []).filter((d) => G.DISTRICTS.some((x) => x[0] === d)),
     notify: { ...s.notify, digestTimes: times.length ? times : DEFAULT_SETTINGS.notify.digestTimes },
   };
 }
@@ -288,7 +312,7 @@ export async function handleApi(body: any) {
         with ${MEDIANS}
         select ${COMPACT}, true as fav, v.created_at as faved_at
         from flatbot.favorites v join flatbot.listings l on l.key = v.key
-        left join med_d md on md.kind = l.kind and md.district is not distinct from l.district
+        left join med_d md on md.kind = l.kind and md.city is not distinct from l.city
         left join med_k mk on mk.kind = l.kind
         where v.chat_id = ${u.id} order by v.created_at desc`;
       return { items };

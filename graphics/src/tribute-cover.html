@@ -1,0 +1,35 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><link rel="stylesheet" href="common.css">
+<style>
+body { width: 1920px; height: 1080px; position: relative; }
+.shade { background: linear-gradient(90deg, rgba(7,12,46,.94) 0%, rgba(7,12,46,.78) 42%, rgba(7,12,46,.15) 70%, rgba(7,12,46,0) 100%); }
+.left { position: absolute; left: 120px; top: 120px; width: 900px; }
+.brand { display: flex; align-items: center; gap: 20px; font-size: 28px; font-weight: 800; margin-bottom: 56px; }
+.brand img { width: 76px; height: 76px; border-radius: 22px; }
+.kicker { font-size: 24px; margin-bottom: 30px; }
+h1 { font-size: 86px; line-height: 1.04; margin-bottom: 30px; }
+p.lead { font-size: 31px; line-height: 1.4; color: #d3dcff; margin-bottom: 44px; max-width: 800px; }
+.chips { font-size: 21px; }
+.card { position: absolute; right: 130px; top: 150px; width: 560px; transform: rotate(2deg); }
+</style></head><body>
+<div class="scene"></div><div class="shade"></div>
+<div class="left">
+  <div class="brand"><img src="logo-1-pin.svg">Квартиры Братислава</div>
+  <div class="kicker"><i></i>Подписка · проверка каждые 10 минут</div>
+  <h1 class="display">Новые квартиры <span class="accent">раньше всех</span></h1>
+  <p class="lead">Бот следит за сайтами недвижимости Братиславы и присылает в Telegram только свежие объявления под ваш бюджет и район.</p>
+  <div class="chips"><span>bazos.sk</span><span>nehnutelnosti.sk</span><span>reality.sk</span><span>topreality.sk</span><span>bezrealitky.sk</span></div>
+</div>
+<div class="card"><div class="tg">
+  <div class="tg-head"><img src="logo-1-pin.svg"><div><b>Квартиры Братислава</b><small>бот · новое объявление</small></div></div>
+  <div class="tg-body"><div class="msg">
+    <div class="photo"><em>НОВОЕ</em></div>
+    <div class="txt">
+      <div class="title">🏠 Гарсонка · Ružinov</div>
+      <div class="price">590 € <span>✅ с энергиями</span></div>
+      <div class="meta">32 м² · 3 этаж · частник, без комиссии<br>Залог 590 € · bazos.sk</div>
+    </div>
+    <div class="time">только что</div>
+  </div>
+  <div class="btns"><div>📍 На карте</div><div>⏰ Напомнить</div></div></div>
+</div></div>
+</body></html>

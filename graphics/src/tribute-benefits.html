@@ -1,0 +1,33 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><link rel="stylesheet" href="common.css">
+<style>
+body { width: 1080px; height: 1350px; position: relative; }
+.scene { background-size: auto 100%; background-position: 30% bottom; }
+.shade { background: linear-gradient(180deg, rgba(7,12,46,.96) 0%, rgba(7,12,46,.9) 60%, rgba(7,12,46,.55) 100%); }
+.wrap { position: absolute; inset: 80px; }
+.brand { display: flex; align-items: center; gap: 18px; font-size: 26px; font-weight: 800; margin-bottom: 44px; }
+.brand img { width: 68px; height: 68px; border-radius: 20px; }
+h1 { font-size: 64px; line-height: 1.06; margin-bottom: 48px; }
+.list { display: grid; gap: 20px; }
+.item { display: flex; gap: 26px; align-items: flex-start; padding: 28px 30px; border-radius: 28px;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); backdrop-filter: blur(10px); }
+.item .ic { flex: none; width: 72px; height: 72px; border-radius: 22px; display: grid; place-items: center; font-size: 38px;
+  background: linear-gradient(135deg, #4f8bff, #1c3cd6); }
+.item b { display: block; font-size: 30px; margin-bottom: 6px; }
+.foot { position: absolute; left: 0; right: 0; bottom: 0; }
+.foot p { font-size: 22px; color: #9fb0e0; font-weight: 700; margin-bottom: 16px; }
+.foot .chips { font-size: 20px; }
+.item span { font-size: 23px; line-height: 1.4; color: #c6d1f5; }
+</style></head><body>
+<div class="scene"></div><div class="shade"></div>
+<div class="wrap">
+  <div class="brand"><img src="logo-1-pin.svg">Квартиры Братислава</div>
+  <h1 class="display">Что входит <span class="accent">в подписку</span></h1>
+  <div class="list">
+    <div class="item"><div class="ic">⚡</div><div><b>Новое за минуты</b><span>Проверка 5 сайтов каждые 10 минут. Приходят только объявления, которых вы ещё не видели.</span></div></div>
+    <div class="item"><div class="ic">🎯</div><div><b>Под ваши фильтры</b><span>Бюджет с энергиями, районы, комната или квартира, частник или агентство.</span></div></div>
+    <div class="item"><div class="ic">💶</div><div><b>Цена без сюрпризов</b><span>Энергии, залог, комиссия и сумма на заезд видны сразу, плюс сравнение с медианой района.</span></div></div>
+    <div class="item"><div class="ic">📱</div><div><b>Мини-приложение</b><span>Лента, карта, избранное, напоминания и готовое сообщение арендодателю на словацком.</span></div></div>
+  </div>
+  <div class="foot"><p>Источники</p><div class="chips"><span>bazos.sk</span><span>nehnutelnosti.sk</span><span>reality.sk</span><span>topreality.sk</span><span>bezrealitky.sk</span></div></div>
+</div>
+</body></html>

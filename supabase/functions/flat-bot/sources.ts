@@ -1,6 +1,9 @@
-// Парсеры сайтов с арендой в Братиславе и окрестностях.
+// Парсеры сайтов с арендой по всей Словакии.
 // list-парсеры дают базовую карточку, detail-парсеры дочитывают фото, координаты,
 // продавца и полное описание; finalize() вытаскивает из текста всё остальное.
+
+import * as G from "./geo.ts";
+export { DISTRICTS, REGIONS, TOWNS } from "./geo.ts";
 
 export type Kind = "flat" | "studio" | "room" | "hostel";
 
@@ -18,7 +21,10 @@ export type Listing = {
   rooms: number | null;
   area: number | null; // м²
   floor: string | null;
-  district: string | null; // ключ из DISTRICTS
+  region: string | null; // край: BA, TT, TN, NR, ZA, BB, PO, KE
+  city: string | null; // ключ города (slug)
+  cityName: string | null; // название города для показа
+  district: string | null; // район Братиславы (ключ из DISTRICTS)
   address: string;
   lat: number | null;
   lng: number | null;
@@ -100,79 +106,49 @@ const num = (s: unknown) => {
 };
 export const bratislavaDate = (d: Date) =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Bratislava" }).format(d);
-const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+const fold = G.fold;
 
 function blank(source: string, id: string, url: string, title: string): Listing {
   return {
     source, id, url, title,
     price: null, charges: null, utilities: "unknown", deposit: null, commission: null,
-    kind: "flat", rooms: null, area: null, floor: null, district: null, address: "",
+    kind: "flat", rooms: null, area: null, floor: null, region: null, city: null, cityName: null, district: null, address: "",
     lat: null, lng: null, agency: null, seller: null, phones: [], emails: [], images: [],
     text: "", published: null, availableFrom: null, tags: [], detailed: false,
   };
 }
 
-// ---------------------------------------------------------------- районы
-// [ключ, название, группа, шаблон по тексту без диакритики]
-export const DISTRICTS: [string, string, "ba" | "okolie", RegExp][] = [
-  ["devinska-nova-ves", "Devínska Nová Ves", "ba", /devinsk\w* nov\w* ves|\bdnv\b/],
-  ["podunajske-biskupice", "Podunajské Biskupice", "ba", /podunajsk\w* biskupic|\bketelec|lieskovec/],
-  ["zahorska-bystrica", "Záhorská Bystrica", "ba", /zahorsk\w* bystric/],
-  ["stare-mesto", "Staré Mesto", "ba", /stare mesto|starom\w*sk|stareho mesta|centrum mesta|v centre bratislavy|\bba i\b|bratislava i\b|palisady|hradn\w* vrch|\beurovea/],
-  ["ruzinov", "Ružinov", "ba", /ruzinov|trnavk|ostredk|\bposen|\bnivy\b|prievoz|travnik|strkovec|\bba ii\b|bratislava ii\b/],
-  ["vrakuna", "Vrakuňa", "ba", /vrakun|dolne hony/],
-  ["nove-mesto", "Nové Mesto", "ba", /nove mesto|novom\w*sk|kramare|koliba|\bmierova kolonia|jurajov dvor|\bba iii\b|bratislava iii\b/],
-  ["raca", "Rača", "ba", /\braca\b|\bracian|krasnan|vychodne/],
-  ["vajnory", "Vajnory", "ba", /vajnor/],
-  ["karlova-ves", "Karlova Ves", "ba", /karlov\w* ves|dlhe diely|kutiky|\bba iv\b|bratislava iv\b/],
-  ["dubravka", "Dúbravka", "ba", /dubravk|dubrav/],
-  ["lamac", "Lamač", "ba", /lamac/],
-  ["devin", "Devín", "ba", /\bdevin\b|\bdevine\b/],
-  ["petrzalka", "Petržalka", "ba", /petrzalk|\bhaje\b|\bdvory\b|ovsist|\bluky\b|kopcan|\bba v\b|bratislava v\b/],
-  ["jarovce", "Jarovce", "ba", /jarovc/],
-  ["rusovce", "Rusovce", "ba", /rusovc/],
-  ["cunovo", "Čunovo", "ba", /cunov/],
-  ["senec", "Senec", "okolie", /\bsenec|\bsenc/],
-  ["pezinok", "Pezinok", "okolie", /pezinok|pezink/],
-  ["stupava", "Stupava", "okolie", /stupav/],
-  ["malacky", "Malacky", "okolie", /malack/],
-  ["samorin", "Šamorín", "okolie", /samorin/],
-  ["ivanka", "Ivanka pri Dunaji", "okolie", /ivank\w* pri dunaji/],
-  ["bernolakovo", "Bernolákovo", "okolie", /bernolakov/],
-  ["chorvatsky-grob", "Chorvátsky Grob", "okolie", /chorvatsk\w* grob|\bcierna voda/],
-  ["svaty-jur", "Svätý Jur", "okolie", /svaty jur|svateho jura/],
-  ["modra", "Modra", "okolie", /\bmodr[ae]\b/],
-  ["dunajska-luzna", "Dunajská Lužná", "okolie", /dunajsk\w* luzn/],
-  ["most", "Most pri Bratislave", "okolie", /most pri bratislav/],
-  ["marianka", "Marianka / Borinka", "okolie", /mariank|borink/],
-  ["zahorie", "Záhorie (Zohor, Lozorno…)", "okolie", /\bzohor|lozorn|\blaksk/],
-];
-
-// Почтовые индексы → район (у bazos часто есть только PSČ)
-const PSC: [RegExp, string][] = [
-  [/^811/, "stare-mesto"], [/^82106/, "podunajske-biskupice"], [/^82107/, "vrakuna"], [/^821/, "ruzinov"],
-  [/^83106/, "raca"], [/^83107/, "vajnory"], [/^831/, "nove-mesto"],
-  [/^84101/, "dubravka"], [/^84102/, "dubravka"], [/^84103/, "lamac"], [/^84104/, "karlova-ves"],
-  [/^84105/, "karlova-ves"], [/^84106/, "zahorska-bystrica"], [/^84107/, "devinska-nova-ves"], [/^84110/, "devin"],
-  [/^851/, "petrzalka"], [/^90301/, "senec"], [/^90201/, "pezinok"], [/^90031/, "stupava"], [/^90101/, "malacky"],
-  [/^93101/, "samorin"], [/^90028/, "ivanka"], [/^90027/, "bernolakovo"], [/^90025/, "chorvatsky-grob"],
-  [/^90021/, "svaty-jur"], [/^90042/, "dunajska-luzna"],
-];
-
-export function detectDistrict(...texts: (string | null | undefined)[]): string | null {
-  for (const t of texts) {
-    if (!t) continue;
-    const f = fold(t);
-    for (const [k, , , re] of DISTRICTS) if (re.test(f)) return k;
-  }
-  for (const t of texts) {
-    const psc = t?.match(/\b(\d{3})\s?(\d{2})\b/);
-    if (psc) {
-      const code = psc[1] + psc[2];
-      for (const [re, k] of PSC) if (re.test(code)) return k;
+// ---------------------------------------------------------------- местоположение
+// hint — город/край, которые сайт отдал явно; остальное ищем в адресе, заголовке и PSČ
+export function locate(l: Listing, hint: { city?: string | null; region?: string | null } = {}) {
+  const psc = G.pscOf(l.address);
+  let town = G.townFromName(hint.city) ?? G.detectTown([l.address, l.title], false);
+  // район Братиславы в адресе/заголовке — значит, это Братислава (а не «Trnavská cesta» → Trnava)
+  if (!town || town.key === "bratislava") {
+    const d = G.detectDistrict([l.address, l.title], psc?.startsWith("8") ? psc : null);
+    if (d) {
+      l.district = l.district ?? d;
+      town = G.townByKey.get("bratislava")!;
     }
   }
-  return null;
+  town ??= G.detectTown([l.title], true);
+  // сайт сказал «Košický kraj», а в заголовке «Trnavská ulica» — верим сайту
+  if (town && hint.region && !hint.city && town.region !== hint.region) town = null;
+  if (town) {
+    l.city = town.key;
+    l.cityName = town.name;
+    l.region = town.region;
+  } else if (hint.city) {
+    // деревня, которой нет в справочнике: оставляем как есть
+    const name = hint.city.replace(/\s*\d{3}\s?\d{2}\s*$/, "").trim();
+    l.city = G.slug(name) || null;
+    l.cityName = name || null;
+  }
+  l.region ??= (hint.region as string) ?? G.regionByName(l.address) ?? G.regionByPsc(psc);
+  if (l.city && G.CITIES_WITH_DISTRICTS.has(l.city) && !l.district) {
+    l.district = G.detectDistrict([l.address, l.title, l.text.slice(0, 600)], psc?.startsWith("8") ? psc : null, l.city);
+  }
+  if (l.district && G.districtCity(l.district) !== l.city) l.district = null;
 }
 
 // ---------------------------------------------------------------- телефоны и почта
@@ -199,10 +175,39 @@ const RE_INCLUDED =
   /vratane\s+(energi|poplatk|sluz|vsetk)|s\s+energiami|energie\s+(su\s+)?v\s+cene|v\s+cene\s+(su\s+)?(aj\s+)?(energi|poplatk|sluz)|vsetko\s+v\s+cene|all\s+(bills|utilities)\s+included|including\s+(bills|utilities)|cena\s+je\s+konecn|\bkomplet\b|\bvcetne\s+energi|bez\s+dalsich\s+poplatkov/;
 const RE_EXTRA =
   /\+\s*energi|plus\s+energi|\+\s*poplatk|plus\s+poplatk|bez\s+energi|\+\s*sluzby|\+\s*utilities|\+\s*bills|energie\s+(navyse|zvlast|samostatne)|\+\s*zalohy\s+na\s+energi|\+\s*naklady/;
-const RE_PRIVATE =
-  /bez\s+(rk|realitk|provizi|sprostredkovatel)|sukromn\w*\s+osob|priamo\s+od\s+majitel|nie\s+som\s+(rk|realitk)|som\s+majitel|ziadna\s+provizia|neplatite\s+proviziu|no\s+(agency|commission)/;
-const RE_AGENCY =
-  /provizi|realitn\w*\s+kancelari|\brk\b|\bmakler|sprostredkovatelsk|odmena\s+rk|\breality\b|\breal\s+estate|\bs\.\s?r\.\s?o\./;
+// ---------------------------------------------------------------- агентство или частник
+// Баллы: > 0 — агентство, < 0 — частник. Сначала ищем явные слова частника
+// («RK nevolať» содержит «RK», но означает как раз владельца).
+const PRIVATE_STRONG =
+  /\b(rk|realitk\w*|realitn\w* kancelari\w*)\s*(prosim\s*)?(ne)?volat\b|nevolajte|nie\s+som\s+(rk|realitk|makler)|bez\s+(rk|realitk\w*|sprostredkovatel\w*|maklera)\b|sukromn\w*\s+(osob|inzer|majitel)|priamo\s+od\s+majitel|som\s+(majitel|vlastnik)|ako\s+majitel|prenajimam\s+(svoj|moj)|ponukam\s+(svoj|moj)|majitel\s+(bytu\s+)?ponuka|no\s+agenc|without\s+agenc|owner\s+direct/;
+const AGENCY_TEXT: [RegExp, number][] = [
+  [/vyhradn\w*\s+(suhlas|poveren|zastup|zmluv)|poveren\w*\s+majitel|exkluzivn\w*/, 4],
+  [/realitn\w*\s+kancelari|nasa\s+(spolocnost|kancelaria|realitk)|zmluv\w*\s+o\s+sprostredkovan|sprostredkovatelsk/, 4],
+  [/\bmakler|maklerk|kontakt\w*\s+na\s+makler|realitn\w*\s+(agent|maklér|specialist)/, 3],
+  [/provizi|odmena\s+(rk|kancelari)|\+\s*rk\b/, 2],
+  [/\bid\s+(inzeratu|ponuky|nehnutelnosti)|cislo\s+ponuky|kod\s+ponuky|referencne\s+cislo/, 2],
+  [/\bponukame\b|\bvieme\s+vam\b|\bkontaktujte\s+nas\b|\bnasu\s+ponuku\b/, 1],
+  [/\brk\b|\breality\b|\breal\s+estate/, 1],
+];
+// имя продавца, похожее на фирму: «NETreal.TK», «TRIANGEL real», «JKV GROUP s.r.o.»
+const AGENCY_NAME =
+  /real|estate|invest|propert|broker|makler|consult|develop|group|partner|holding|byty|bytov|domov|home|house|residen|s\.?\s?r\.?\s?o|\ba\.\s?s\.|spol\.|\brk\b|\.(sk|tk|cz|com|eu|net)\b|kancelari/;
+// «Michal», «Peter Opet», «Kokoškova D.» — похоже на обычного человека
+const PERSON_NAME = /^[\p{Lu}][\p{Ll}]+(\s+[\p{Lu}][\p{Ll}]*\.?){0,2}$/u;
+
+function classifyAgency(l: Listing): boolean | null {
+  const f = fold(`${l.title}\n${l.text}`);
+  const seller = fold(l.seller ?? "");
+  if (PRIVATE_STRONG.test(f)) return false;
+  let score = 0;
+  if (seller && AGENCY_NAME.test(seller)) score += 4;
+  for (const [re, w] of AGENCY_TEXT) if (re.test(f)) score += w;
+  if (/\bponukam\b/.test(f)) score -= 1; // «ponúkam» — от первого лица, чаще пишут частники
+  if (score >= 2) return true;
+  // на Bazoši частники пишут под своим именем; без признаков агентства считаем частником
+  if (l.source === "bazos" && l.detailed && l.seller && PERSON_NAME.test(l.seller.trim()) && score <= 0) return false;
+  return score <= -1 ? false : null;
+}
 
 function parseText(l: Listing) {
   const f = fold(`${l.title}\n${l.text}`);
@@ -232,10 +237,7 @@ function parseText(l: Listing) {
     if (/bez\s+provizi|ziadna\s+provizia|neplatite\s+proviziu|provizi\w*\s*(?:je\s*)?(?:0|nula)\b/.test(f)) l.commission = false;
     else if (/provizi|odmena\s+rk/.test(f)) l.commission = true;
   }
-  if (l.agency == null) {
-    if (RE_PRIVATE.test(f)) l.agency = false;
-    else if (RE_AGENCY.test(fold(l.seller ?? "")) || RE_AGENCY.test(f)) l.agency = true;
-  }
+  if (l.agency == null) l.agency = classifyAgency(l);
   if (l.commission == null && l.agency === false) l.commission = false;
 
   if (l.area == null) {
@@ -270,7 +272,7 @@ function classify(l: Listing, hint: Kind | null) {
 export function finalize(l: Listing, hint: Kind | null = null) {
   parseText(l);
   classify(l, hint);
-  if (!l.district) l.district = detectDistrict(l.address, l.title, l.text.slice(0, 600));
+  if (!l.city && !l.region) locate(l); // местоположение ещё не определяли
   const all = `${l.title}\n${l.text}`;
   l.phones = [...new Set([...l.phones, ...findPhones(all)])].slice(0, 3);
   l.emails = [...new Set([...l.emails, ...findEmails(all)])];
@@ -281,11 +283,11 @@ export function finalize(l: Listing, hint: Kind | null = null) {
 // ---------------------------------------------------------------- bazos.sk
 const SEEKER = /(^|[^\p{L}])(h[lľ]ad[aá]me?|dopyt|sh[aá]n[ií]m|kúpim)([^\p{L}]|$)/iu;
 
-export function bazos(category: "byt" | "podnajom", maxPrice: number, radius: number, offsets = [0, 20]) {
+export function bazos(category: "byt" | "podnajom", offsets = [0, 20]) {
   return pages(offsets, async (offset) => {
     const out: Listing[] = [];
     const html = await get(
-      `https://reality.bazos.sk/prenajmu/${category}/${offset ? offset + "/" : ""}?hlokalita=81101&humkreis=${radius}&cenado=${maxPrice}`,
+      `https://reality.bazos.sk/prenajmu/${category}/${offset ? offset + "/" : ""}`,
     );
     for (const card of html.split('<div class="inzeraty inzeratyflex">').slice(1)) {
       const a = card.match(/<h2 class=nadpis><a href="(\/inzerat\/(\d+)\/[^"]*)">([\s\S]*?)<\/a>/);
@@ -299,6 +301,7 @@ export function bazos(category: "byt" | "podnajom", maxPrice: number, radius: nu
       l.address = strip(card.match(/class="inzeratylok">([\s\S]*?)<\/div>/)?.[1] ?? "").replace(/\n/g, " ");
       const img = card.match(/https:\/\/www\.bazos\.sk\/img\/1t\/(\d+)\/(\d+)\.jpg/);
       if (img) l.images.push(`https://www.bazos.sk/img/1/${img[1]}/${img[2]}.jpg`);
+      locate(l, { city: l.address.replace(/\s*\d{3}\s?\d{2}\s*$/, "") });
       out.push(finalize(l, category === "podnajom" ? "room" : null));
     }
     return out;
@@ -333,12 +336,12 @@ function ldBlocks(html: string): any[] {
 }
 const isType = (n: any, t: string) => (Array.isArray(n["@type"]) ? n["@type"].includes(t) : n["@type"] === t);
 
-export function nehnutelnosti(maxPrice: number, pageList = [1]) {
+export function nehnutelnosti(region: G.Region, pageList = [1]) {
+  const r = G.REGIONS.find((x) => x.key === region)!;
   return pages(pageList, async (page) => {
     const out: Listing[] = [];
     const html = await get(
-      `https://www.nehnutelnosti.sk/vysledky/byty/bratislavsky-kraj/prenajom?priceTo=${maxPrice}&order=NEWEST` +
-        (page > 1 ? `&page=${page}` : ""),
+      `https://www.nehnutelnosti.sk/vysledky/byty/${r.slug}/prenajom?order=NEWEST` + (page > 1 ? `&page=${page}` : ""),
     );
     const nodes = ldBlocks(html);
     const agents = new Map<string, string>();
@@ -363,6 +366,7 @@ export function nehnutelnosti(maxPrice: number, pageList = [1]) {
         l.agency = !/sukromn|majitel/.test(fold(seller));
       }
       const cat = fold(it.category ?? "");
+      locate(l, { region });
       out.push(finalize(l, /garson|1 izb/.test(cat) ? "studio" : "flat"));
     }
     return out;
@@ -390,20 +394,28 @@ export async function nehnutelnostiDetail(l: Listing) {
   const street = html.match(/\\"street\\":\\"([^\\]{2,60})\\",\\"point\\"/);
   if (street && !l.address) l.address = decode(street[1]);
   const city = html.match(/\\"city\\":\\"([a-z-]+)\\",\\"category\\"/);
-  if (city) l.district = detectDistrict(city[1].replace(/-/g, " ")) ?? l.district;
+  if (city) {
+    // slug вида bratislava-ruzinov, kosice-juh, banska-bystrica
+    const words = city[1].split("-");
+    const town = G.townByKey.get(city[1]) ?? G.townByKey.get(words[0]) ?? G.townByKey.get(words.slice(0, 2).join("-"));
+    if (town) Object.assign(l, { city: town.key, cityName: town.name, region: town.region });
+    if (town && G.CITIES_WITH_DISTRICTS.has(town.key)) {
+      l.district = G.detectDistrict([words.slice(town.key.split("-").length).join(" ")], null, town.key) ?? l.district;
+    }
+  }
   const adv = html.match(/\\"advertiser\\":\{\\"id\\":\\"[^\\]*\\",\\"name\\":\\"([^\\]+)\\"/);
   if (adv && l.seller && !l.seller.includes(" · ")) l.seller = `${decode(adv[1])} · ${l.seller}`;
 }
 
 // ---------------------------------------------------------- topreality.sk
-export function topreality(maxPrice: number, pageList = [1]) {
+export function topreality(pageList = [1]) {
   const types = [101, 108, 102, 103, 104, 109, 110, 107].map((t) => `&type%5B%5D=${t}`).join("");
   return pages(pageList, async (page) => {
     const out: Listing[] = [];
     // страницы у topreality — в пути: vyhladavanie-nehnutelnosti-2.html
     const html = await get(
       `https://www.topreality.sk/vyhladavanie-nehnutelnosti${page > 1 ? `-${page}` : ""}.html?form=3${types}` +
-        `&obec=c100-Bratislavsk%C3%BD+kraj&cena_do=${maxPrice}&searchType=string&n_search=search&sort=date_desc`,
+        `&searchType=string&n_search=search&sort=date_desc`,
     );
     for (const card of html.split('data-ga4-container-item_id_generic="').slice(1)) {
       const id = card.match(/^(\d+)/)?.[1];
@@ -414,7 +426,10 @@ export function topreality(maxPrice: number, pageList = [1]) {
       l.price = int(attr("price"));
       const loc = [...card.matchAll(/class="location-(?:address|city|district)">([^<]*)</g)].map((m) => decode(m[1]).trim());
       l.address = loc.join(" ").replace(/\s*,\s*$/, "") || attr("location_id");
-      l.district = detectDistrict(attr("item_category3"), attr("location_id"));
+      const cat3 = attr("item_category3"); // «Košice-Juh», «Bratislava-Ružinov», «Zvolen»
+      const head = cat3.split("-")[0];
+      locate(l, { city: G.townFromName(head) ? head : cat3, region: G.regionByName(attr("location_id")) });
+      if (l.city && G.CITIES_WITH_DISTRICTS.has(l.city)) l.district = G.detectDistrict([cat3.slice(head.length)], null, l.city) ?? l.district;
       const aff = attr("affiliation").trim();
       l.seller = aff || null;
       l.agency = aff ? !/sukromn/.test(fold(aff)) : null;
@@ -462,7 +477,7 @@ export function bezrealitky(pageList = [1]) {
     const out: Listing[] = [];
     const pp = nextData(
       await get(
-        "https://www.bezrealitky.sk/vypis/ponuka-prenajom/byt/bratislava?order=TIMEORDER_DESC" +
+        "https://www.bezrealitky.sk/vypis/ponuka-prenajom/byt?order=TIMEORDER_DESC" +
           (page > 1 ? `&page=${page}` : ""),
       ),
     );
@@ -491,6 +506,9 @@ export function bezrealitky(pageList = [1]) {
       for (const ref of pick(v, "publicImages") ?? []) l.images.push(imgUrl(ref));
       if (!l.images.length && v.mainImage) l.images.push(imgUrl(v.mainImage));
       l.tags.push(...((pick(v, "tags") ?? []) as string[]).slice(0, 3));
+      // «Ulica, Bratislava - mestská časť Staré Mesto - Oblasť…, Bratislavský kraj»
+      const parts = l.address.split(", ");
+      locate(l, { city: parts.length > 2 ? parts[parts.length - 2].split(" - ")[0] : null, region: G.regionByName(l.address) });
       out.push(finalize(l, v.roommate ? "room" : /GARS|DISP_1/.test(disp) ? "studio" : "flat"));
     }
     return out;
@@ -517,10 +535,8 @@ export async function detail(l: Listing) {
   else if (l.source === "bezrealitky") await bezrealitkyDetail(l);
   l.detailed = true;
   // после полного описания пересчитываем то, что зависит от текста
-  const district = l.district;
   l.phones = [];
   l.emails = [];
-  l.district = null;
+  if (l.city && G.CITIES_WITH_DISTRICTS.has(l.city) && !l.district) locate(l, { city: l.cityName ?? l.city });
   finalize(l, l.kind);
-  l.district = district ?? l.district;
 }

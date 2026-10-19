@@ -56,6 +56,9 @@ export const SOURCE_LABEL: Record<string, string> = {
   bezrealitky: "Bezrealitky",
 };
 export const districtName = (k: string | null) => S.DISTRICTS.find((d) => d[0] === k)?.[1] ?? null;
+// «Bratislava · Ružinov», «Košice», «Nová Dedinka»
+export const placeName = (l: Pick<Listing, "cityName" | "district">) =>
+  [l.cityName, districtName(l.district)].filter(Boolean).join(" · ") || null;
 
 export function priceLine(l: Listing): string {
   const t = S.total(l);
@@ -70,7 +73,7 @@ export const appLink = (key?: string) => APP_URL + (key ? `#l=${encodeURICompone
 
 export function render(l: Listing) {
   const lines = [`🏠 <b>${esc(l.title.slice(0, 180))}</b>`, "💶 " + priceLine(l)];
-  const where = [districtName(l.district), KIND_LABEL[l.kind], l.area ? `${l.area} м²` : null, l.floor ? `${l.floor} эт.` : null]
+  const where = [placeName(l), KIND_LABEL[l.kind], l.area ? `${l.area} м²` : null, l.floor ? `${l.floor} эт.` : null]
     .filter(Boolean).join(" · ");
   if (where) lines.push("📍 " + esc(where));
   if (l.agency === true) lines.push(`🏢 Агентство${l.seller ? `: ${esc(l.seller.slice(0, 60))}` : ""}${l.commission ? " · комиссия" : ""}`);
@@ -110,7 +113,7 @@ export async function sendListing(chat_id: number, l: Listing, prefix = "") {
 export async function sendDigest(chat_id: number, ls: Listing[], title: string) {
   const lines = ls.slice(0, 12).map((l) => {
     const t = S.total(l) ?? l.price;
-    const d = districtName(l.district) ?? "";
+    const d = placeName(l) ?? "";
     return `• <b>${t ?? "?"} €</b> · ${esc(KIND_LABEL[l.kind])}${d ? " · " + esc(d) : ""}\n  <a href="${esc(l.url)}">${esc(l.title.slice(0, 70))}</a>`;
   });
   const more = ls.length > 12 ? `\n…и ещё ${ls.length - 12}` : "";

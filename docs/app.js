@@ -1,4 +1,4 @@
-/* Мини-приложение «Квартиры Братислава» для Telegram.
+/* Мини-приложение «Аренда в Словакии» для Telegram.
    Без сборки: один файл, ванильный JS. Данные — API облачной функции flat-bot. */
 (() => {
   "use strict";
@@ -7,7 +7,8 @@
   const inTG = !!(tg && tg.initData);
   const API = "https://nnkhlnzjkwtcjvzyubzc.supabase.co/functions/v1/flat-bot";
   const CALL_URL = (n) => `${API}?action=call&n=${encodeURIComponent(n)}`;
-  const BA_CENTER = [48.1486, 17.1077];
+  const SK_CENTER = [48.67, 19.7];
+  const NO_LIMIT = 10000; // «до 10 000 €» = без ограничения сверху
 
   // ---------------------------------------------------------------- утилиты
   const $ = (s, el = document) => el.querySelector(s);
@@ -112,10 +113,10 @@
 
   // ---------------------------------------------------------------- справочники
   const KINDS = [
-    { k: "room", em: "🛏️", name: "Комната", short: "Комнаты", hint: "отдельная комната, совместное проживание" },
-    { k: "studio", em: "🛋️", name: "Студия / 1-комн.", short: "Студии", hint: "гарсонка или 1-izbový byt" },
-    { k: "flat", em: "🏢", name: "Квартира", short: "Квартиры", hint: "1,5 комнаты и больше" },
-    { k: "hostel", em: "🏨", name: "Общежитие", short: "Ubytovňa", hint: "ubytovňa: дёшево, заселение быстро" },
+    { k: "room", em: "🛏️", name: "Комната", short: "Комнаты", tiny: "в общей квартире", hint: "отдельная комната, совместное проживание" },
+    { k: "studio", em: "🛋️", name: "Студия / 1-комн.", short: "Студии", tiny: "гарсонка, 1-izb.", hint: "гарсонка или 1-izbový byt" },
+    { k: "flat", em: "🏢", name: "Квартира", short: "Квартиры", tiny: "1,5 комнаты и больше", hint: "1,5 комнаты и больше" },
+    { k: "hostel", em: "🏨", name: "Общежитие", short: "Ubytovňa", tiny: "дёшево и быстро", hint: "ubytovňa: дёшево, заселение быстро" },
   ];
   const KIND = Object.fromEntries(KINDS.map((x) => [x.k, x]));
   const SOURCES = { bazos: "Bazoš", nehnutelnosti: "Nehnuteľnosti", topreality: "TopReality", bezrealitky: "Bezrealitky" };
@@ -126,11 +127,27 @@
     { k: "m2", name: "Дешевле за м²", hint: "цена за квадратный метр" },
   ];
   const AGENCY = [
-    { k: "any", em: "🤝", name: "Все объявления", hint: "и частники, и агентства" },
-    { k: "private", em: "👤", name: "Без агентства", hint: "без комиссии, напрямую с владельцем" },
-    { k: "agency", em: "🏢", name: "Только агентства", hint: "больше выбор, обычно есть комиссия" },
+    { k: "any", em: "🤝", name: "Все объявления", short: "Все", hint: "и частники, и агентства" },
+    { k: "private", em: "👤", name: "Без агентства", short: "Частники", hint: "без комиссии, напрямую с владельцем" },
+    { k: "agency", em: "🏢", name: "Только агентства", short: "Агентства", hint: "больше выбор, обычно есть комиссия" },
   ];
-  const districtName = (k) => st.districts.find((d) => d.key === k)?.name ?? null;
+  // география: края, города, районы (приходят из bootstrap)
+  const geo = { regions: [], cities: [], districts: [] };
+  const cityName = (k) => geo.cities.find((c) => c.key === k)?.name ?? null;
+  const regionName = (k) => geo.regions.find((r) => r.key === k)?.name ?? null;
+  const districtName = (k) => geo.districts.find((d) => d.key === k)?.name ?? null;
+  const districtCity = (k) => geo.districts.find((d) => d.key === k)?.city ?? null;
+  const placeOf = (it) => [cityName(it.city) ?? it.city_name ?? it.cityName, districtName(it.district)].filter(Boolean).join(" · ") || null;
+  const locEmpty = (f) => !f.regions?.length && !f.cities?.length && !f.districts?.length;
+  function locLabel(f) {
+    const parts = [
+      ...(f.cities ?? []).map(cityName),
+      ...(f.districts ?? []).map((d) => `${cityName(districtCity(d))} · ${districtName(d)}`),
+      ...(f.regions ?? []).map(regionName),
+    ].filter(Boolean);
+    if (!parts.length) return "Вся Словакия";
+    return parts.length <= 2 ? parts.join(", ") : `${parts[0]} и ещё ${parts.length - 1}`;
+  }
 
   // ---------------------------------------------------------------- состояние
   const st = {
@@ -150,7 +167,7 @@
   };
   const filtersFrom = (s) => ({
     kinds: [...s.kinds], minTotal: s.minTotal, maxTotal: s.maxTotal, agency: s.agency,
-    districts: [...s.districts], withPhone: s.withPhone, withPhoto: s.withPhoto, onlyNew: false,
+    regions: [...(s.regions ?? [])], cities: [...(s.cities ?? [])], districts: [...(s.districts ?? [])], withPhone: s.withPhone, withPhoto: s.withPhoto, onlyNew: false,
   });
 
   // ---------------------------------------------------------------- API
@@ -228,7 +245,7 @@
     const wrap = el(`<div><div class="scrim"></div><div class="sheet"><div class="grab"></div>${html}</div></div>`);
     wrap.style.position = "fixed";
     wrap.style.inset = "0";
-    wrap.style.zIndex = "60";
+    wrap.style.zIndex = "90";
     const s = $(".sheet", wrap);
     $(".scrim", wrap).onclick = () => closeLayer();
     // свайп вниз закрывает шторку
@@ -286,7 +303,7 @@
   }
   function metaHTML(it) {
     const parts = [
-      districtName(it.district),
+      placeOf(it),
       KIND[it.kind]?.name,
       it.area ? `${fmt(it.area)} м²` : null,
     ].filter(Boolean);
@@ -321,7 +338,7 @@
       </div>
       <div class="body">
         <div class="ttl">${esc(it.title)}</div>
-        <div class="meta">${tile ? `<span>${esc(districtName(it.district) ?? KIND[it.kind]?.name ?? "")}</span>` : metaHTML(it) + `<span>${esc(when(it))}</span>`}</div>
+        <div class="meta">${tile ? `<span>${esc(placeOf(it) ?? KIND[it.kind]?.name ?? "")}</span>` : metaHTML(it) + `<span>${esc(when(it))}</span>`}</div>
         ${tile ? "" : `<div class="pills">${pillsHTML(it)}</div>`}
       </div>
     </button>`;
@@ -429,7 +446,7 @@
       if (sub && st.lastCheck) sub.textContent = subline();
     }
   }, 1000);
-  const subline = () => `4 сайта · обновлено ${st.lastCheck ? ago(st.lastCheck.at) : "—"}`;
+  const subline = () => `Аренда · 4 сайта · обновлено ${st.lastCheck ? ago(st.lastCheck.at) : "—"}`;
 
   async function checkForNew() {
     try {
@@ -458,7 +475,7 @@
     if (f.kinds.length !== 4) n++;
     if (f.maxTotal !== d.maxTotal || f.minTotal) n++;
     if (f.agency !== "any") n++;
-    if (f.districts.length) n++;
+    if (!locEmpty(f)) n++;
     if (f.withPhone) n++;
     if (f.withPhoto) n++;
     return n;
@@ -470,8 +487,8 @@
     return `
       <button class="chip ${n ? "on" : ""}" data-act="filters">${ic("sliders")}Фильтры${n ? `<span class="dot">${n}</span>` : ""}</button>
       <button class="chip" data-act="filters">${esc(kindLabel)}${ic("down")}</button>
-      <button class="chip" data-act="filters">${f.minTotal ? `${fmt(f.minTotal)}–` : "до "}${fmt(f.maxTotal)} €${ic("down")}</button>
-      <button class="chip ${f.districts.length ? "on" : ""}" data-act="districts">${ic("pin")}${f.districts.length ? `${f.districts.length} ${plural(f.districts.length, "район", "района", "районов")}` : "Все районы"}</button>
+      <button class="chip ${locEmpty(f) ? "" : "on"}" data-act="loc">${ic("pin")}${esc(locLabel(f))}</button>
+      <button class="chip" data-act="filters">${esc(budgetText(f.maxTotal))}${ic("down")}</button>
       <button class="chip ${f.agency === "private" ? "on" : ""}" data-toggle="private">👤 Без агентства</button>
       <button class="chip ${f.onlyNew ? "on" : ""}" data-toggle="onlyNew">🆕 За 24 часа</button>
       <button class="chip ${f.withPhone ? "on" : ""}" data-toggle="withPhone">${ic("phone")}С телефоном</button>
@@ -484,7 +501,7 @@
     scr.innerHTML = `
       <header class="top flat">
         <div class="top-row">
-          <div style="flex:1;min-width:0"><h1 class="title">Жильё в Братиславе</h1><div class="subtitle" id="subline">${esc(subline())}</div></div>
+          <div style="flex:1;min-width:0"><h1 class="title"><button class="loc-title" data-act="loc" id="loc-title"><span>${esc(locLabel(st.filters))}</span>${ic("down")}</button></h1><div class="subtitle" id="subline">${esc(subline())}</div></div>
           ${timerHTML()}
         </div>
         <label class="search">${ic("search")}<input id="q" type="search" placeholder="Улица, район, слово из описания" value="${esc(st.q)}" enterkeyhint="search"></label>
@@ -522,11 +539,7 @@
       if (!b) return;
       haptic.soft();
       if (b.dataset.act === "filters") openFilters();
-      else if (b.dataset.act === "districts") openDistricts(st.filters.districts, (d) => {
-        st.filters.districts = d;
-        refreshChips();
-        loadFeed(true);
-      });
+      else if (b.dataset.act === "loc") openLocation(st.filters, afterLoc);
       else if (b.dataset.toggle) {
         const k = b.dataset.toggle;
         if (k === "private") st.filters.agency = st.filters.agency === "private" ? "any" : "private";
@@ -535,6 +548,7 @@
         loadFeed(true);
       }
     };
+    $("#loc-title").onclick = () => (haptic.soft(), openLocation(st.filters, afterLoc));
     $("[data-act=sort]").onclick = openSort;
     $("#views").onclick = (e) => {
       const b = e.target.closest("[data-view]");
@@ -562,6 +576,12 @@
   function refreshChips() {
     const c = $("#chips");
     if (c) c.innerHTML = chipsHTML();
+    const t = $("#loc-title span");
+    if (t) t.textContent = locLabel(st.filters);
+  }
+  function afterLoc() {
+    refreshChips();
+    loadFeed(true);
   }
 
   async function loadFeed(reset) {
@@ -628,33 +648,61 @@
   }
 
   // ---------------------------------------------------------------- фильтры
-  function budgetHTML(min, max, id = "b") {
-    return `<div class="budget"><span id="${id}-min">${min ? fmt(min) + " –" : "до"}</span><b class="num" id="${id}-max">${fmt(max)}</b><span>€ в месяц</span></div>
-      <div class="range2" id="${id}-range"><div class="track"></div><div class="fill"></div>
-        <input type="range" min="0" max="1000" step="10" value="${min}" aria-label="Минимум">
-        <input type="range" min="100" max="1000" step="10" value="${max}" aria-label="Максимум"></div>
-      <div class="mlabels"><span>0 €</span><span>1 000 €</span></div>`;
-  }
-  function bindBudget(root, id, state) {
-    const [a, b] = $$(`#${id}-range input`, root);
-    const fill = $(`#${id}-range .fill`, root);
-    const upd = () => {
-      let lo = +a.value, hi = +b.value;
-      if (lo > hi - 50) {
-        lo = hi - 50;
-        a.value = lo;
+  // ---------------------------------------------------------------- бюджет: один ползунок до 10 000 €
+  // шкала нелинейная: первая половина — до 1 000 €, дальше крупнее шаг
+  const BP = [[0, 100], [500, 1000], [800, 3000], [1000, NO_LIMIT]];
+  function posToVal(p) {
+    for (let i = 0; i < BP.length - 1; i++) {
+      const [p0, v0] = BP[i], [p1, v1] = BP[i + 1];
+      if (p <= p1) {
+        const v = v0 + ((p - p0) / (p1 - p0)) * (v1 - v0);
+        const step = v < 1000 ? 10 : v < 3000 ? 50 : 500;
+        return Math.min(NO_LIMIT, Math.round(v / step) * step);
       }
-      state.minTotal = lo;
-      state.maxTotal = hi;
-      $(`#${id}-min`, root).textContent = lo ? `${fmt(lo)} –` : "до";
-      $(`#${id}-max`, root).textContent = fmt(hi);
-      fill.style.left = `${(lo / 1000) * 100}%`;
-      fill.style.right = `${100 - (hi / 1000) * 100}%`;
-    };
-    a.oninput = () => (haptic.soft(), upd());
-    b.oninput = () => (haptic.soft(), upd());
-    upd();
+    }
+    return NO_LIMIT;
   }
+  function valToPos(v) {
+    for (let i = 0; i < BP.length - 1; i++) {
+      const [p0, v0] = BP[i], [p1, v1] = BP[i + 1];
+      if (v <= v1) return Math.round(p0 + ((Math.max(v, v0) - v0) / (v1 - v0)) * (p1 - p0));
+    }
+    return 1000;
+  }
+  const budgetText = (v) => (v >= NO_LIMIT ? "Любая цена" : `до ${fmt(v)} €`);
+  function budgetHTML(max, id = "b") {
+    return `<div class="budget"><span>до</span><b class="num" id="${id}-v">${max >= NO_LIMIT ? "10 000+" : fmt(max)}</b><span>€ / мес</span></div>
+      <input type="range" class="brange" id="${id}-r" min="0" max="1000" step="1" value="${valToPos(max)}" aria-label="Бюджет">
+      <div class="bscale"><span style="left:0">100 €</span><span style="left:50%">1 000</span><span style="left:80%">3 000</span><span style="left:100%">10 000 €</span></div>
+      <div class="quick">${[400, 650, 1000, 2000, NO_LIMIT].map((v) => `<button class="chip" data-bq="${v}">${v >= NO_LIMIT ? "Без лимита" : `до ${fmt(v)} €`}</button>`).join("")}</div>`;
+  }
+  function bindBudget(root, id, state, onChange) {
+    const r = $(`#${id}-r`, root);
+    const upd = (v) => {
+      state.maxTotal = v;
+      state.minTotal = 0;
+      $(`#${id}-v`, root).textContent = v >= NO_LIMIT ? "10 000+" : fmt(v);
+      r.style.setProperty("--p", `${+r.value / 10}%`);
+      $$("[data-bq]", root).forEach((b) => b.classList.toggle("on", +b.dataset.bq === v));
+      onChange?.();
+    };
+    r.oninput = () => {
+      haptic.soft();
+      upd(posToVal(+r.value));
+    };
+    root.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-bq]");
+      if (!b || !root.contains(r)) return;
+      haptic.soft();
+      r.value = valToPos(+b.dataset.bq);
+      upd(+b.dataset.bq);
+    });
+    upd(state.maxTotal);
+  }
+  const kinds4HTML = (sel) => `<div class="kinds4">${KINDS.map((k) => `
+    <button class="${sel.includes(k.k) ? "on" : ""}" data-kind="${k.k}"><span class="e">${k.em}</span><span>${k.short}<small>${k.tiny}</small></span></button>`).join("")}</div>`;
+  const agencySegHTML = (sel) => `<div class="seg3">${AGENCY.map((a) => `
+    <button class="${sel === a.k ? "on" : ""}" data-agency="${a.k}"><span class="e">${a.em}</span>${a.short}</button>`).join("")}</div>`;
   function kindsHTML(sel) {
     return `<div class="opts two">${KINDS.map((k) => `
       <button class="opt ${sel.includes(k.k) ? "on" : ""}" data-kind="${k.k}"><span class="tick">${ic("check")}</span><div class="em">${k.em}</div><b>${k.name}</b><small>${k.hint}</small></button>`).join("")}</div>`;
@@ -690,11 +738,11 @@
     const s = sheet(`
       <h2>Фильтры</h2><p class="lead">Применяются к ленте. Можно сохранить их и для уведомлений.</p>
       <div class="group-title" style="margin:6px 0 8px">Бюджет с энергиями</div>
-      <div class="card2" style="margin:0 0 6px">${budgetHTML(f.minTotal, f.maxTotal, "fb")}</div>
+      <div class="card2" style="margin:0 0 6px">${budgetHTML(f.maxTotal, "fb")}</div>
       <div class="group-title" style="margin:16px 0 8px">Что ищем</div>${kindsHTML(f.kinds)}
       <div class="group-title" style="margin:16px 0 8px">Кто сдаёт</div>${agencyHTML(f.agency)}
-      <div class="group-title" style="margin:16px 0 8px">Районы и города</div>
-      <button class="cell card2" style="margin:0" id="f-d"><span class="lbl">${f.districts.length ? esc(f.districts.map(districtName).join(", ")) : "Все районы и окрестности"}</span>${ic("chev").replace("<svg", '<svg class="chev"')}</button>
+      <div class="group-title" style="margin:16px 0 8px">Где искать</div>
+      <button class="cell card2" style="margin:0" id="f-d"><span class="ic" style="background:#ff8a3d">📍</span><span class="lbl">${esc(locLabel(f))}</span>${ic("chev").replace("<svg", '<svg class="chev"')}</button>
       <div class="group" style="margin:16px 0 0">
         ${switchCell("withPhone", "📞", "#12a46c", "Только с телефоном", "можно сразу позвонить", f.withPhone)}
         ${switchCell("withPhoto", "📷", "#7a5cff", "Только с фото", "", f.withPhoto)}
@@ -707,10 +755,7 @@
     bindKinds(s, f);
     bindAgency(s, f);
     $$("input[data-sw]", s).forEach((i) => (i.onchange = () => (f[i.dataset.sw] = i.checked, haptic.soft())));
-    $("#f-d", s).onclick = () => openDistricts(f.districts, (d) => {
-      f.districts = d;
-      $("#f-d .lbl", s).textContent = d.length ? d.map(districtName).join(", ") : "Все районы и окрестности";
-    });
+    $("#f-d", s).onclick = () => openLocation(f, () => ($("#f-d .lbl", s).textContent = locLabel(f)));
     const apply = () => {
       st.filters = { ...f, onlyNew: st.filters.onlyNew };
       closeLayer();
@@ -732,44 +777,184 @@
       <span class="switch"><input type="checkbox" data-sw="${key}" ${on ? "checked" : ""}><span></span></span></label>`;
   }
 
-  function openDistricts(selected, onDone) {
-    let sel = new Set(selected);
-    const groups = [["ba", "Братислава"], ["okolie", "Окрестности"]];
-    const s = sheet(`
-      <h2>Районы и города</h2><p class="lead">Ничего не выбрано — ищем везде. В скобках — объявлений за 30 дней.</p>
-      <label class="search" style="margin:0 0 4px">${ic("search")}<input id="dq" type="search" placeholder="Найти район"></label>
-      <div class="dgroups">${groups.map(([g, name]) => `
-        <h4>${name}<button data-all="${g}">выбрать все</button></h4>
-        <div class="dchips">${st.districts.filter((d) => d.group === g).sort((a, b) => b.n - a.n).map((d) => `
-          <button class="chip ${sel.has(d.key) ? "on" : ""}" data-d="${d.key}" data-name="${esc(d.name.toLowerCase())}">${esc(d.name)} <small>${d.n}</small></button>`).join("")}</div>`).join("")}
-      </div>
-      <div class="sheet-foot"><button class="btn plain" id="d-clear">Везде</button><button class="btn" style="flex:1" id="d-ok">Готово</button></div>`);
-    const paint = () => $$("[data-d]", s).forEach((b) => b.classList.toggle("on", sel.has(b.dataset.d)));
-    s.addEventListener("click", (e) => {
-      const d = e.target.closest("[data-d]");
-      const all = e.target.closest("[data-all]");
-      if (d) {
-        haptic.soft();
-        sel.has(d.dataset.d) ? sel.delete(d.dataset.d) : sel.add(d.dataset.d);
-        paint();
-      } else if (all) {
-        haptic.soft();
-        const keys = st.districts.filter((x) => x.group === all.dataset.all).map((x) => x.key);
-        const allOn = keys.every((k) => sel.has(k));
-        keys.forEach((k) => (allOn ? sel.delete(k) : sel.add(k)));
-        paint();
+  // ---------------------------------------------------------------- выбор местоположения
+  // Сначала город, потом (если у города есть районы) — районы. Выбор хранится как
+  // { regions, cities, districts }: объявление подходит, если совпало хоть что-то; всё пусто — вся Словакия.
+  const hasDistricts = (c) => geo.districts.some((d) => d.city === c);
+  const normQ = (s) => s.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+
+  function locPicker(root, sel, onChange) {
+    let view = null; // ключ города, если открыт экран его районов
+    let q = "";
+    let showAll = {};
+    const changed = () => {
+      haptic.soft();
+      onChange?.();
+    };
+    const cityOn = (c) => sel.cities.includes(c) || geo.districts.some((d) => d.city === c && sel.districts.includes(d.key));
+    const total = geo.regions.reduce((a, r) => a + r.n, 0);
+    const row = (c) => {
+      const on = cityOn(c.key);
+      const dist = hasDistricts(c.key);
+      const picked = geo.districts.filter((d) => d.city === c.key && sel.districts.includes(d.key)).length;
+      return `<button class="crow ${on ? "on" : ""} ${c.n ? "" : "zero"}" data-c="${esc(c.key)}">
+        <span class="nm">${esc(c.name)}${dist ? `<small>${picked ? `${picked} ${plural(picked, "район", "района", "районов")}` : sel.cities.includes(c.key) ? "весь город" : "есть районы"}</small>` : ""}</span>
+        <span class="n">${c.n || ""}</span>
+        ${dist ? `<span class="go">${ic("chev")}</span>` : `<span class="ck">${ic("check")}</span>`}</button>`;
+    };
+
+    function selectedChips() {
+      const chips = [
+        ...sel.regions.map((r) => [`r:${r}`, regionName(r)]),
+        ...sel.cities.map((c) => [`c:${c}`, cityName(c)]),
+        ...sel.districts.map((d) => [`d:${d}`, `${cityName(districtCity(d))} · ${districtName(d)}`]),
+      ];
+      return chips.length
+        ? `<div class="loc-sel">${chips.map(([k, n]) => `<button class="chip on" data-x="${esc(k)}">${esc(n ?? "")}<span class="x">${ic("x")}</span></button>`).join("")}</div>`
+        : "";
+    }
+
+    function citiesHTML() {
+      const empty = locEmpty(sel);
+      let list;
+      if (q) {
+        const hits = geo.cities.filter((c) => normQ(c.name).includes(q)).slice(0, 40);
+        list = hits.length ? `<div class="clist">${hits.map(row).join("")}</div>` : `<div class="muted" style="padding:16px 4px">Ничего не нашлось</div>`;
+      } else {
+        const popular = geo.cities.filter((c) => c.n).slice(0, 8);
+        list = `<div class="loc-h">Популярные города</div><div class="clist">${popular.map(row).join("")}</div>
+          <div class="loc-h">Все города по краям</div>
+          ${geo.regions.map((r) => {
+            const cs = geo.cities.filter((c) => c.region === r.key);
+            const visible = showAll[r.key] ? cs : cs.filter((c) => c.n);
+            const whole = sel.regions.includes(r.key);
+            return `<details class="reg" data-reg="${r.key}" ${openRegs.has(r.key) ? "open" : ""}>
+              <summary>${ic("chev")}<span>${esc(r.name)}</span><span class="n">${r.n}</span><span class="sp"></span>
+                <button class="whole ${whole ? "on" : ""}" data-r="${r.key}">${whole ? "✓ Весь край" : "Весь край"}</button></summary>
+              <div class="clist in">${visible.map(row).join("")}</div>
+              ${cs.length > visible.length ? `<button class="sort" style="margin:2px 14px 12px" data-more="${r.key}">Ещё ${cs.length - visible.length} ${plural(cs.length - visible.length, "город", "города", "городов")} без объявлений</button>` : ""}
+            </details>`;
+          }).join("")}`;
       }
-    });
-    $("#dq", s).oninput = (e) => {
-      const q = e.target.value.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
-      $$("[data-d]", s).forEach((b) => (b.hidden = q && !b.dataset.name.normalize("NFD").replace(/\p{M}/gu, "").includes(q)));
-    };
-    $("#d-clear", s).onclick = () => {
-      sel = new Set();
+      return `<button class="bigopt ${empty ? "on" : ""}" data-sk><span class="e">🇸🇰</span><span class="t"><b>Вся Словакия</b><small>${fmt(total)} объявлений · все города</small></span><span class="ck">${ic("check")}</span></button>
+        <label class="search" style="margin:12px 0 0">${ic("search")}<input id="lp-q" type="search" placeholder="Найти город или деревню" value="${esc(q)}"></label>
+        ${selectedChips()}
+        <div id="lp-list">${list}</div>`;
+    }
+
+    function districtsHTML(c) {
+      const city = geo.cities.find((x) => x.key === c);
+      const ds = geo.districts.filter((d) => d.city === c).sort((a, b) => b.n - a.n);
+      const whole = sel.cities.includes(c);
+      return `<button class="sort" data-back style="margin:2px 0 10px">${ic("back")}Все города</button>
+        <h3 style="margin:0 0 12px;font-size:22px">${esc(city?.name ?? c)}</h3>
+        <button class="bigopt ${whole ? "on" : ""}" data-whole="${esc(c)}"><span class="e">🏙️</span><span class="t"><b>Весь город</b><small>${city?.n ?? 0} объявлений во всех районах</small></span><span class="ck">${ic("check")}</span></button>
+        <div class="loc-h">Или только нужные районы</div>
+        <div class="dchips">${ds.map((d) => `<button class="chip ${sel.districts.includes(d.key) ? "on" : ""} ${d.n ? "" : "zero"}" data-d="${d.key}">${esc(d.name)} <small>${d.n}</small></button>`).join("")}</div>
+        <button class="btn block" data-back style="margin-top:18px">Готово</button>`;
+    }
+
+    const openRegs = new Set();
+    function paint() {
+      root.innerHTML = view ? districtsHTML(view) : citiesHTML();
+      const inp = $("#lp-q", root);
+      if (inp) inp.oninput = (e) => {
+        q = normQ(e.target.value.trim());
+        const sel0 = inp.selectionStart;
+        paint();
+        const i2 = $("#lp-q", root);
+        i2.focus();
+        i2.setSelectionRange(sel0, sel0);
+      };
+    }
+    root.addEventListener("toggle", (e) => {
+      const d = e.target.closest?.("[data-reg]");
+      if (d) d.open ? openRegs.add(d.dataset.reg) : openRegs.delete(d.dataset.reg);
+    }, true);
+    root.addEventListener("click", (e) => {
+      const t = e.target.closest("button");
+      if (!t || !root.contains(t)) return;
+      const rm = (arr, v) => arr.splice(0, arr.length, ...arr.filter((x) => x !== v));
+      if (t.dataset.sk != null) {
+        sel.regions.length = sel.cities.length = sel.districts.length = 0;
+      } else if (t.dataset.r) {
+        e.preventDefault(); // не сворачивать край
+        const r = t.dataset.r;
+        if (sel.regions.includes(r)) rm(sel.regions, r);
+        else {
+          sel.regions.push(r);
+          // города этого края уже входят в «весь край»
+          for (const c of geo.cities.filter((c) => c.region === r)) rm(sel.cities, c.key);
+          for (const d of geo.districts.filter((d) => geo.cities.find((c) => c.key === d.city)?.region === r)) rm(sel.districts, d.key);
+        }
+      } else if (t.dataset.c) {
+        const c = t.dataset.c;
+        if (hasDistricts(c)) {
+          view = c;
+          haptic.tap();
+          paint();
+          root.scrollIntoView?.({ block: "start" });
+          return;
+        }
+        sel.cities.includes(c) ? rm(sel.cities, c) : sel.cities.push(c);
+      } else if (t.dataset.whole) {
+        const c = t.dataset.whole;
+        if (sel.cities.includes(c)) rm(sel.cities, c);
+        else {
+          sel.cities.push(c);
+          for (const d of geo.districts.filter((d) => d.city === c)) rm(sel.districts, d.key);
+        }
+      } else if (t.dataset.d) {
+        const d = t.dataset.d;
+        if (sel.districts.includes(d)) rm(sel.districts, d);
+        else {
+          sel.districts.push(d);
+          rm(sel.cities, districtCity(d)); // выбран район — значит, не весь город
+        }
+      } else if (t.dataset.x) {
+        const [kind, k] = [t.dataset.x[0], t.dataset.x.slice(2)];
+        rm(kind === "r" ? sel.regions : kind === "c" ? sel.cities : sel.districts, k);
+      } else if (t.dataset.more) {
+        showAll[t.dataset.more] = true;
+        paint();
+        return;
+      } else if (t.dataset.back != null) {
+        view = null;
+        haptic.tap();
+        paint();
+        return;
+      } else return;
+      changed();
       paint();
-    };
-    $("#d-ok", s).onclick = () => {
-      onDone([...sel]);
+    });
+    paint();
+  }
+
+  // количество объявлений под фильтры — для кнопок «Готово · N» и онбординга
+  let countTimer, countSeq = 0;
+  function liveCount(filters, cb) {
+    clearTimeout(countTimer);
+    const seq = ++countSeq;
+    countTimer = setTimeout(async () => {
+      try {
+        const r = await api("feed", { filters, limit: 1 });
+        if (seq === countSeq) cb(r.total);
+      } catch { /* без счётчика */ }
+    }, 250);
+  }
+
+  function openLocation(target, onDone) {
+    const sel = { regions: [...target.regions], cities: [...target.cities], districts: [...target.districts] };
+    const s = sheet(`<h2>Где искать</h2><p class="lead">Выберите город. У Братиславы и Кошице можно уточнить районы.</p>
+      <div id="lp"></div>
+      <div class="sheet-foot"><button class="btn block" id="lp-ok">Показать</button></div>`);
+    const ok = $("#lp-ok", s);
+    const upd = () => liveCount({ ...st.filters, ...sel }, (n) => (ok.textContent = `Показать ${fmt(n)} ${plural(n, "объявление", "объявления", "объявлений")}`));
+    locPicker($("#lp", s), sel, upd);
+    upd();
+    ok.onclick = () => {
+      Object.assign(target, sel);
+      onDone();
       closeLayer();
     };
   }
@@ -817,7 +1002,7 @@
     try {
       const [L, r] = await Promise.all([loadLeaflet(), api("map", { filters: { ...st.filters, q: st.q } })]);
       if (st.view !== "map" || !document.body.contains(wrap)) return;
-      map = L.map("map", { zoomControl: false, attributionControl: true }).setView(BA_CENTER, 12);
+      map = L.map("map", { zoomControl: false, attributionControl: true }).setView(SK_CENTER, 7);
       tiles(L, $("#map")).addTo(map);
       mapMarkers = r.points.map((p) => {
         const m = L.marker([p.lat, p.lng], {
@@ -889,7 +1074,7 @@
     const fav = st.favs.has(key);
     const total = it.total ?? it.price;
     const imgs = (it.images ?? []).filter(Boolean);
-    const dName = districtName(it.district);
+    const dName = placeOf(it);
     const perM2 = total && it.area ? Math.round(total / it.area) : null;
     const moveIn = it.price ? (it.deposit ?? it.price) + (total ?? it.price) + (it.commission ? it.price : 0) : null;
 
@@ -909,7 +1094,7 @@
       const diff = Math.round((total / r.median - 1) * 100);
       const lo = Math.min(total, r.median) * 0.7, hi = Math.max(total, r.median) * 1.3;
       const pos = (v) => `${((v - lo) / (hi - lo)) * 100}%`;
-      const scope = r.medianScope === "district" && dName ? `${KIND[it.kind]?.short.toLowerCase()} в районе ${dName}` : `${KIND[it.kind]?.short.toLowerCase()} по всему региону`;
+      const scope = r.medianScope === "city" && it.cityName ? `${KIND[it.kind]?.short.toLowerCase()} в городе ${it.cityName}` : `${KIND[it.kind]?.short.toLowerCase()} по всей Словакии`;
       market = `<div class="market">
         <div style="font-size:14px">${diff <= -3 ? `<b style="color:var(--good)">На ${-diff}% дешевле</b>` : diff >= 3 ? `<b style="color:var(--warn)">На ${diff}% дороже</b>` : "<b>Около средней цены</b>"} медианы — ${fmt(r.median)} € (${esc(scope)}, ${r.medianN} ${plural(r.medianN, "объявление", "объявления", "объявлений")})</div>
         <div class="mtrack"><div class="mtick" style="left:${pos(r.median)}"><span>медиана ${fmt(r.median)}</span></div><div class="mdot" style="left:${pos(total)}"></div></div>
@@ -1211,7 +1396,7 @@
   // ---------------------------------------------------------------- рынок
   async function renderMarket() {
     const scr = $("#screen");
-    scr.innerHTML = `<header class="top"><div class="top-row"><h1 class="title">Рынок аренды</h1></div><div class="subtitle">Братислава и окрестности · последние 30 дней</div></header>
+    scr.innerHTML = `<header class="top"><div class="top-row"><h1 class="title">Рынок аренды</h1></div><div class="subtitle">Вся Словакия · последние 30 дней</div></header>
       <div class="stats">${'<div class="stat"><div class="sk" style="height:46px"></div></div>'.repeat(4)}</div>`;
     let s;
     try {
@@ -1223,14 +1408,15 @@
     const T = s.totals ?? {};
     const kindStats = Object.fromEntries((s.byKind ?? []).map((k) => [k.kind, k]));
     const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
-    const maxD = Math.max(...(s.byDistrict ?? []).map((d) => +d.median), 1);
+    const byCity = s.byCity ?? [];
+    const maxD = Math.max(...byCity.map((d) => +d.median), 1);
     const maxDay = Math.max(...(s.perDay ?? []).map((d) => d.n), 1);
     const maxSrc = Math.max(...(s.bySource ?? []).map((d) => d.n), 1);
-    const cheapest = (s.byDistrict ?? [])[0];
+    const cheapest = byCity[0];
     const budget = st.settings?.maxTotal ?? 650;
-    const okDistricts = (s.byDistrict ?? []).filter((d) => d.median <= budget).length;
+    const okCities = byCity.filter((d) => d.median <= budget).length;
 
-    scr.innerHTML = `<header class="top"><div class="top-row"><h1 class="title">Рынок аренды</h1></div><div class="subtitle">Братислава и окрестности · последние 30 дней</div></header>
+    scr.innerHTML = `<header class="top"><div class="top-row"><h1 class="title">Рынок аренды</h1></div><div class="subtitle">Вся Словакия · последние 30 дней</div></header>
       <div class="stats">
         <div class="stat"><small>Объявлений</small><b>${fmt(T.total)}</b><span>за 30 дней</span></div>
         <div class="stat"><small>Новых</small><b>${fmt(T.new24)}</b><span>за последние 24 ч</span></div>
@@ -1242,14 +1428,14 @@
       <div class="stats">${KINDS.filter((k) => kindStats[k.k]).map((k) => `
         <div class="stat"><small>${k.em} ${k.name}</small><b>${fmt(kindStats[k.k].median)} €</b><span>от ${fmt(kindStats[k.k].min)} € · ${kindStats[k.k].n} шт.</span></div>`).join("")}</div>
 
-      ${cheapest ? `<div class="card2" style="margin-top:14px"><h3>💡 Подсказка</h3><div style="font-size:14.5px">Дешевле всего студии и квартиры в районе <b>${esc(districtName(cheapest.district) ?? "—")}</b> — медиана ${fmt(cheapest.median)} €. В ваш бюджет ${fmt(budget)} € медиана укладывается в ${okDistricts} ${plural(okDistricts, "районе", "районах", "районах")} из ${(s.byDistrict ?? []).length}.</div></div>` : ""}
+      ${cheapest ? `<div class="card2" style="margin-top:14px"><h3>💡 Подсказка</h3><div style="font-size:14.5px">Из крупных городов дешевле всего студии и квартиры в <b>${esc(cheapest.city_name)}</b> — медиана ${fmt(cheapest.median)} €.${budget < NO_LIMIT ? ` В ваш бюджет ${fmt(budget)} € медиана укладывается в ${okCities} ${plural(okCities, "городе", "городах", "городах")} из ${byCity.length}.` : ""}</div></div>` : ""}
 
-      <div class="group-title">Студии и квартиры: медиана по районам</div>
-      <div class="card2"><div class="hbars" id="hb">${(s.byDistrict ?? []).map((d) => `
-        <button class="hbar" data-d="${esc(d.district ?? "")}" title="${esc(`${districtName(d.district) ?? "Не определён"}: ${fmt(d.median)} €, ${d.n} объявлений`)}">
-          <span class="nm">${esc(districtName(d.district) ?? "Не определён")}</span>
+      <div class="group-title">Студии и квартиры: медиана по городам</div>
+      <div class="card2"><div class="hbars" id="hb">${byCity.map((d) => `
+        <button class="hbar" data-d="${esc(d.city)}" title="${esc(`${d.city_name}: ${fmt(d.median)} €, ${d.n} объявлений`)}">
+          <span class="nm">${esc(d.city_name)}</span>
           <span class="tr"><i style="width:${(d.median / maxD) * 100}%"></i></span><span class="v">${fmt(d.median)} €</span></button>`).join("")}</div>
-        <div class="legend-note">Нажмите на район, чтобы открыть его объявления. Только районы с 3+ объявлениями.</div></div>
+        <div class="legend-note">15 городов с наибольшим числом объявлений. Нажмите на город, чтобы открыть его объявления.</div></div>
 
       <div class="group-title">Новые объявления по дням</div>
       <div class="card2"><div class="vbars">${(s.perDay ?? []).map((d, i, a) => `
@@ -1264,8 +1450,7 @@
       const b = e.target.closest("[data-d]");
       if (!b || !b.dataset.d) return;
       haptic.tap();
-      st.filters.districts = [b.dataset.d];
-      st.filters.kinds = ["studio", "flat"];
+      Object.assign(st.filters, { regions: [], cities: [b.dataset.d], districts: [], kinds: ["studio", "flat"] });
       go("feed");
     };
   }
@@ -1296,9 +1481,9 @@
       <div class="group-title">Что присылать</div>
       <div class="group-note">Эти фильтры работают и для уведомлений бота, и для ленты по умолчанию.</div>
       <div class="group"><div class="cell col">${kindsHTML(s.kinds)}</div></div>
-      <div class="group"><div class="cell col"><span class="muted" style="font-size:13px">Бюджет с энергиями</span>${budgetHTML(s.minTotal, s.maxTotal, "sb")}</div></div>
+      <div class="group"><div class="cell col"><span class="muted" style="font-size:13px">Бюджет с энергиями</span>${budgetHTML(s.maxTotal, "sb")}</div></div>
       <div class="group">
-        <button class="cell" id="s-d"><span class="ic" style="background:#ff8a3d">📍</span><span class="lbl">Районы и города<small id="s-dl">${s.districts.length ? esc(s.districts.map(districtName).join(", ")) : "везде"}</small></span>${ic("chev").replace("<svg", '<svg class="chev"')}</button>
+        <button class="cell" id="s-d"><span class="ic" style="background:#ff8a3d">📍</span><span class="lbl">Где искать<small id="s-dl">${esc(locLabel(s))}</small></span>${ic("chev").replace("<svg", '<svg class="chev"')}</button>
         ${switchCell("withPhone", "📞", "#12a46c", "Только с телефоном", "", s.withPhone)}
         ${switchCell("withPhoto", "📷", "#7a5cff", "Только с фото", "", s.withPhoto)}
       </div>
@@ -1334,10 +1519,7 @@
         $("#s-q").hidden = !i.checked;
       } else s[i.dataset.sw] = i.checked;
     }));
-    $("#s-d").onclick = () => openDistricts(s.districts, (d) => {
-      s.districts = d;
-      $("#s-dl").textContent = d.length ? d.map(districtName).join(", ") : "везде";
-    });
+    $("#s-d").onclick = () => openLocation(s, () => ($("#s-dl").textContent = locLabel(s)));
     $("#s-mode").onclick = (e) => {
       const b = e.target.closest("[data-m]");
       if (!b) return;
@@ -1380,7 +1562,7 @@
         toast("Не получилось. Нажмите «Старт» в чате с ботом");
       }
     };
-    $("#s-onb").onclick = () => onboarding(true);
+    $("#s-onb").onclick = () => onboarding();
     $("#s-save").onclick = async () => {
       st.settings = s;
       st.filters = filtersFrom(s);
@@ -1390,118 +1572,91 @@
     };
   }
 
-  // ---------------------------------------------------------------- онбординг
-  function onboarding(again = false) {
+  // ---------------------------------------------------------------- онбординг: 3 коротких шага
+  function onboarding() {
     const s = structuredClone(st.settings);
-    let step = 0, dir = 1;
-    const ov = el(`<div class="onb"><div class="onb-top"><div class="onb-progress"><i></i></div><button class="onb-skip">Пропустить</button></div>
-      <div class="onb-body"></div><div class="onb-foot"></div></div>`);
-    $("#layer").append(ov);
-    const steps = [
-      {
-        html: () => `
-          <div class="hero"><i></i><i></i><i></i><span class="big">🏠</span><span class="floaty" style="left:22px;top:20px">🔑</span><span class="floaty" style="right:24px;bottom:22px;animation-delay:-2s">📍</span></div>
-          <h1>Найдём жильё в Братиславе быстрее остальных</h1>
-          <p class="lead">Я слежу за сайтами с арендой и присылаю новые объявления, пока их не разобрали.</p>
-          <div class="features">
-            <div class="feature"><span class="fi">⚡</span><div><b>Каждые 10 минут</b><span>bazos, nehnutelnosti (+reality, byty), topreality, bezrealitky</span></div></div>
-            <div class="feature"><span class="fi">📞</span><div><b>Звонок в один тап</b><span>телефоны и контакты прямо из описания</span></div></div>
-            <div class="feature"><span class="fi">💶</span><div><b>Честная цена</b><span>с энергиями, залогом, комиссией и сравнением с рынком</span></div></div>
-            <div class="feature"><span class="fi">⏰</span><div><b>Напоминания</b><span>не забудете перезвонить или сходить на просмотр</span></div></div>
-          </div>`,
-        next: "Начать",
-      },
-      {
-        html: () => `<h1>Что ищем?</h1><p class="lead">Можно выбрать несколько вариантов.</p>${kindsHTML(s.kinds)}`,
-        bind: (r) => bindKinds(r, s),
-      },
-      {
-        html: () => `<h1>Какой бюджет?</h1><p class="lead">Считаю цену <b>вместе с энергиями</b>, если они указаны в объявлении.</p>
-          <div class="card2" style="margin:0;padding:20px 16px">${budgetHTML(s.minTotal, s.maxTotal, "ob")}</div>
-          <div class="dchips" style="margin-top:14px">${[400, 500, 650, 800].map((v) => `<button class="chip" data-quick="${v}">до ${v} €</button>`).join("")}</div>`,
-        bind: (r) => {
-          bindBudget(r, "ob", s);
-          r.addEventListener("click", (e) => {
-            const b = e.target.closest("[data-quick]");
-            if (!b) return;
-            haptic.soft();
-            $$("#ob-range input", r)[1].value = b.dataset.quick;
-            $$("#ob-range input", r)[1].dispatchEvent(new Event("input"));
-          });
-        },
-      },
-      {
-        html: () => `<h1>Где искать?</h1><p class="lead">Ничего не выбрано — ищу по всей Братиславе и окрестностям.</p>
-          <div class="dgroups">${[["ba", "Братислава"], ["okolie", "Окрестности · с машиной или поездом"]].map(([g, nm]) => `
-            <h4>${nm}<button data-all="${g}">все</button></h4><div class="dchips">${st.districts.filter((d) => d.group === g).sort((a, b) => b.n - a.n).map((d) => `
-            <button class="chip ${s.districts.includes(d.key) ? "on" : ""}" data-d="${d.key}">${esc(d.name)} <small>${d.n}</small></button>`).join("")}</div>`).join("")}</div>`,
-        bind: (r) => r.addEventListener("click", (e) => {
-          const d = e.target.closest("[data-d]");
-          const all = e.target.closest("[data-all]");
-          if (d) {
-            haptic.soft();
-            s.districts = s.districts.includes(d.dataset.d) ? s.districts.filter((x) => x !== d.dataset.d) : [...s.districts, d.dataset.d];
-          } else if (all) {
-            const keys = st.districts.filter((x) => x.group === all.dataset.all).map((x) => x.key);
-            const on = keys.every((k) => s.districts.includes(k));
-            s.districts = on ? s.districts.filter((k) => !keys.includes(k)) : [...new Set([...s.districts, ...keys])];
-          } else return;
-          $$("[data-d]", r).forEach((b) => b.classList.toggle("on", s.districts.includes(b.dataset.d)));
-        }),
-      },
-      {
-        html: () => `<h1>С агентством или без?</h1><p class="lead">Агентства обычно берут комиссию — около одной месячной аренды. Частники — нет, но их объявления разбирают быстрее.</p>${agencyHTML(s.agency)}`,
-        bind: (r) => bindAgency(r, s),
-      },
-      {
-        html: () => `<h1>Как присылать?</h1><p class="lead">Новые объявления приходят в чат с ботом.</p>
-          <div class="opts">${[["instant", "⚡", "Сразу", "каждое новое объявление в течение 10 минут — лучший вариант, когда жильё нужно срочно"], ["digest", "📬", "Подборкой", "2–3 раза в день в удобное время"], ["off", "🔕", "Не присылать", "буду смотреть сам в приложении"]].map(([k, em, t, h]) => `
-            <button class="opt row-opt ${s.notify.mode === k ? "on" : ""}" data-m="${k}"><div class="em">${em}</div><div style="flex:1"><b>${t}</b><small>${h}</small></div><span class="tick">${ic("check")}</span></button>`).join("")}</div>
-          <div class="group" style="margin:16px 0 0">${switchCell("quiet", "🌙", "#5856d6", "Тихие часы 23:00–07:00", "ночью не беспокоить", s.notify.quiet.on)}</div>`,
-        bind: (r) => {
-          r.addEventListener("click", (e) => {
-            const b = e.target.closest("[data-m]");
-            if (!b) return;
-            haptic.soft();
-            s.notify.mode = b.dataset.m;
-            $$("[data-m]", r).forEach((x) => x.classList.toggle("on", x === b));
-          });
-          $("input[data-sw=quiet]", r).onchange = (e) => (s.notify.quiet.on = e.target.checked);
-        },
-      },
-      {
-        html: () => `<div class="hero" style="height:150px"><i></i><i></i><i></i><span class="big" style="font-size:70px">🎉</span></div>
-          <div class="big-count"><b class="num" id="ob-count">…</b><span class="muted">подходящих объявлений прямо сейчас</span></div>
-          <div class="summary">
-            <div class="kv" style="padding:10px 16px"><span>Ищем</span><b>${esc(s.kinds.length === 4 ? "любое жильё" : s.kinds.map((k) => KIND[k].short).join(", "))}</b></div>
-            <div class="kv" style="padding:10px 16px"><span>Бюджет</span><b>${s.minTotal ? fmt(s.minTotal) + "–" : "до "}${fmt(s.maxTotal)} €</b></div>
-            <div class="kv" style="padding:10px 16px"><span>Где</span><b>${s.districts.length ? `${s.districts.length} ${plural(s.districts.length, "район", "района", "районов")}` : "везде"}</b></div>
-            <div class="kv" style="padding:10px 16px"><span>Агентства</span><b>${AGENCY.find((a) => a.k === s.agency).name}</b></div>
-            <div class="kv" style="padding:10px 16px"><span>Уведомления</span><b>${{ instant: "сразу", digest: "подборкой", off: "выключены" }[s.notify.mode]}</b></div>
-          </div>`,
-        bind: async () => {
-          try {
-            const r = await api("feed", { filters: filtersFrom(s), limit: 1 });
-            $("#ob-count").textContent = fmt(r.total);
-          } catch {
-            $("#ob-count").textContent = "—";
-          }
-        },
-        next: "Смотреть объявления",
-      },
+    let step = 0, count = null;
+    const STEPS = [
+      { em: "📍", h: "Где ищете жильё?", p: "Любой город Словакии. У Братиславы и Кошице — ещё и районы." },
+      { em: "🏠", h: "Что и за сколько?", p: "Цену считаю вместе с энергиями, если они указаны." },
+      { em: "🔔", h: "Как сообщать о новых?", p: "Новые объявления приходят в чат с ботом за 10 минут." },
     ];
-    const finish = async () => {
+    const ov = el(`<div class="onb3">
+      <div class="onb3-hero"><div class="onb3-bar">${STEPS.map(() => "<i></i>").join("")}<button id="ob-skip">Пропустить</button></div>
+        <div class="onb3-head"><span class="em"></span><div><h1></h1><p></p></div></div></div>
+      <div class="onb3-body"></div>
+      <div class="onb3-foot"><button class="btn plain back" id="ob-back" aria-label="Назад">${ic("back")}</button><button class="btn" id="ob-next"></button></div></div>`);
+    $("#layer").append(ov);
+    const body = $(".onb3-body", ov);
+    const next = $("#ob-next", ov);
+
+    const label = () => {
+      const n = count == null ? "" : `<small>· ${fmt(count)} ${plural(count, "вариант", "варианта", "вариантов")}</small>`;
+      next.innerHTML = (step < STEPS.length - 1 ? "Дальше" : "Начать поиск") + n;
+    };
+    const recount = () => liveCount(filtersFrom(s), (n) => {
+      count = n;
+      label();
+    });
+
+    function render(dir = 1) {
+      const S0 = STEPS[step];
+      $$(".onb3-bar i", ov).forEach((x, i) => x.classList.toggle("on", i <= step));
+      $(".onb3-head .em", ov).textContent = S0.em;
+      $(".onb3-head h1", ov).textContent = S0.h;
+      $(".onb3-head p", ov).textContent = S0.p;
+      $("#ob-back", ov).hidden = step === 0;
+      $("#ob-skip", ov).hidden = step === STEPS.length - 1;
+      body.innerHTML = `<div class="onb-step ${dir < 0 ? "back" : ""}"></div>`;
+      const b = body.firstChild;
+      body.scrollTop = 0;
+      if (step === 0) {
+        locPicker(b, s, recount);
+      } else if (step === 1) {
+        b.innerHTML = `<div class="label">Тип жилья</div>${kinds4HTML(s.kinds)}
+          <div class="label" style="margin-top:20px">Бюджет в месяц</div><div class="card2" style="padding:16px">${budgetHTML(s.maxTotal, "ob")}</div>
+          <div class="label" style="margin-top:20px">Кто сдаёт</div>${agencySegHTML(s.agency)}
+          <div class="muted" style="font-size:12.5px;margin-top:8px">Агентства обычно берут комиссию ≈ одна месячная аренда.</div>`;
+        bindKinds(b, s);
+        b.addEventListener("click", (e) => e.target.closest("[data-kind]") && recount());
+        bindBudget(b, "ob", s, recount);
+        bindAgency(b, s);
+        b.addEventListener("click", (e) => e.target.closest("[data-agency]") && recount());
+      } else {
+        const modes = [["instant", "⚡", "Сразу", "каждое новое объявление — лучший вариант, когда жильё нужно срочно"], ["digest", "📬", "Подборкой", "в 9:00, 13:00 и 19:00, время можно поменять"], ["off", "🔕", "Не присылать", "буду смотреть сам в приложении"]];
+        b.innerHTML = `<div class="opts">${modes.map(([k, em, t, h]) => `
+            <button class="opt row-opt ${s.notify.mode === k ? "on" : ""}" data-m="${k}"><div class="em">${em}</div><div style="flex:1"><b>${t}</b><small>${h}</small></div><span class="tick">${ic("check")}</span></button>`).join("")}</div>
+          <div class="group" style="margin:14px 0 0">${switchCell("quiet", "🌙", "#5856d6", "Тихие часы 23:00–07:00", "ночью не беспокоить, пришлю утром", s.notify.quiet.on)}</div>
+          <div class="card2" style="margin-top:14px;font-size:14px"><b>Ваш поиск:</b> ${esc(locLabel(s))} · ${esc(s.kinds.length === 4 ? "любое жильё" : s.kinds.map((k) => KIND[k].short.toLowerCase()).join(", "))} · ${esc(budgetText(s.maxTotal).toLowerCase())}${s.agency === "private" ? " · без агентства" : s.agency === "agency" ? " · агентства" : ""}</div>`;
+        b.addEventListener("click", (e) => {
+          const m = e.target.closest("[data-m]");
+          if (!m) return;
+          haptic.soft();
+          s.notify.mode = m.dataset.m;
+          $$("[data-m]", b).forEach((x) => x.classList.toggle("on", x === m));
+        });
+        $("input[data-sw=quiet]", b).onchange = (e) => (s.notify.quiet.on = e.target.checked);
+      }
+      if (tg?.BackButton) step > 0 ? tg.BackButton.show() : tg.BackButton.hide();
+      label();
+    }
+
+    const back = () => {
+      if (step === 0) return;
+      step--;
+      haptic.tap();
+      render(-1);
+    };
+    async function finish() {
       st.settings = s;
       st.filters = filtersFrom(s);
       store.set("onboarded", true);
       haptic.ok();
-      ov.classList.add("closing");
+      tg?.BackButton?.offClick?.(back);
       ov.style.transition = "opacity .25s";
       ov.style.opacity = "0";
-      setTimeout(() => ov.remove(), 250);
-      tg?.BackButton?.offClick?.(onBack);
+      setTimeout(() => ov.remove(), 260);
       syncBack();
-      // разрешение писать в чат — нужно, если приложение открыли не из бота
       if (inTG && s.notify.mode !== "off" && tg.requestWriteAccess) {
         try {
           tg.requestWriteAccess();
@@ -1509,40 +1664,18 @@
       }
       await saveSettings(true);
       go("feed");
+    }
+    next.onclick = () => {
+      haptic.tap();
+      if (step === STEPS.length - 1) return finish();
+      step++;
+      render(1);
     };
-    const onBack = () => {
-      if (step > 0) {
-        dir = -1;
-        step--;
-        paint();
-      }
-    };
-    const paint = () => {
-      const st0 = steps[step];
-      $(".onb-progress i", ov).style.width = `${((step + 1) / steps.length) * 100}%`;
-      $(".onb-skip", ov).hidden = step === steps.length - 1;
-      const body = $(".onb-body", ov);
-      body.innerHTML = `<div class="onb-step ${dir < 0 ? "back" : ""}">${st0.html()}</div>`;
-      body.scrollTop = 0;
-      st0.bind?.(body);
-      $(".onb-foot", ov).innerHTML = `${step > 0 ? `<button class="btn plain" style="flex:0 0 56px" id="ob-back" aria-label="Назад">${ic("back")}</button>` : ""}<button class="btn" id="ob-next">${st0.next ?? "Дальше"}</button>`;
-      $("#ob-next", ov).onclick = () => {
-        haptic.tap();
-        if (step === steps.length - 1) return finish();
-        dir = 1;
-        step++;
-        paint();
-      };
-      $("#ob-back", ov)?.addEventListener("click", onBack);
-      if (tg?.BackButton) step > 0 ? tg.BackButton.show() : tg.BackButton.hide();
-    };
-    tg?.BackButton?.onClick(onBack);
-    $(".onb-skip", ov).onclick = () => {
-      step = steps.length - 1;
-      paint();
-    };
-    if (again) haptic.tap();
-    paint();
+    $("#ob-back", ov).onclick = back;
+    $("#ob-skip", ov).onclick = finish;
+    tg?.BackButton?.onClick(back);
+    render();
+    recount();
   }
 
   // ---------------------------------------------------------------- старт
@@ -1564,7 +1697,7 @@
       applyScheme();
       tg.onEvent?.("themeChanged", applyScheme);
     }
-    $("#screen").innerHTML = `<header class="top"><h1 class="title">Жильё в Братиславе</h1></header><div class="feed">${skeletons("cards")}</div>`;
+    $("#screen").innerHTML = `<header class="top"><h1 class="title">Аренда в Словакии</h1></header><div class="feed">${skeletons("cards")}</div>`;
     try {
       st.boot = await api("bootstrap");
     } catch {
@@ -1573,7 +1706,7 @@
     }
     st.me = st.boot.me;
     st.defaults = st.boot.defaults;
-    st.districts = st.boot.districts;
+    Object.assign(geo, { regions: st.boot.regions, cities: st.boot.cities, districts: st.boot.districts });
     st.lastCheck = st.boot.lastCheck;
     st.settings = st.me?.settings ?? store.get("settings", null) ?? structuredClone(st.defaults);
     st.filters = filtersFrom(st.settings);

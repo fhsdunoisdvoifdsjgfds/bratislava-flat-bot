@@ -1,0 +1,81 @@
+@import url("https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800&family=Manrope:wght@500;600;700;800&display=block");
+
+:root {
+  --blue: #2f6bff;
+  --blue-2: #1c3cd6;
+  --warm: #ffb547;
+  --good: #2ee59d;
+  --navy: #0b1238;
+  --ink: #0f1422;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { overflow: hidden; }
+body { font-family: "Manrope", system-ui, sans-serif; color: #fff; -webkit-font-smoothing: antialiased; }
+.display { font-family: "Unbounded", system-ui, sans-serif; letter-spacing: -0.02em; }
+
+/* фон: силуэт Братиславы */
+.scene { position: absolute; inset: 0; background: url(skyline.svg) center bottom / cover no-repeat, #070c2e; }
+.shade { position: absolute; inset: 0; }
+
+/* бейдж */
+.kicker {
+  display: inline-flex; align-items: center; gap: .5em;
+  padding: .45em 1em; border-radius: 999px;
+  background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .22);
+  backdrop-filter: blur(8px); font-weight: 700; letter-spacing: .02em;
+}
+.kicker i { width: .6em; height: .6em; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 .25em rgba(46, 229, 157, .25); }
+
+.accent { color: var(--warm); }
+
+/* источники */
+.chips { display: flex; flex-wrap: wrap; gap: .5em; }
+.chips span {
+  padding: .35em .8em; border-radius: 999px; font-weight: 700;
+  background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .18);
+}
+
+/* карточка уведомления в стиле Telegram */
+.tg {
+  width: 100%; border-radius: 28px; overflow: hidden;
+  background: rgba(16, 22, 52, .78); border: 1px solid rgba(255, 255, 255, .14);
+  backdrop-filter: blur(18px); box-shadow: 0 30px 80px rgba(0, 0, 0, .45);
+}
+.tg-head { display: flex; align-items: center; gap: 14px; padding: 18px 22px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+.tg-head img { width: 48px; height: 48px; border-radius: 50%; }
+.tg-head b { display: block; font-size: 20px; }
+.tg-head small { color: #8fa3d9; font-size: 15px; font-weight: 600; }
+.tg-body { padding: 18px 20px 20px; }
+.msg {
+  background: #24305f; border-radius: 20px 20px 20px 6px; overflow: hidden;
+  font-size: 19px; line-height: 1.45;
+}
+.msg .photo {
+  height: 190px; position: relative;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,.35)),
+    linear-gradient(135deg, #f6d8b0 0%, #e9b98a 35%, #b9c7e8 36%, #dfe7f7 70%, #c6d2ee 100%);
+}
+.msg .photo::before { /* окно */
+  content: ""; position: absolute; left: 56%; top: 22px; width: 30%; height: 120px; border-radius: 6px;
+  background: linear-gradient(180deg, #8ec5ff, #d6ebff); box-shadow: inset 0 0 0 6px #fff;
+}
+.msg .photo::after { /* диван */
+  content: ""; position: absolute; left: 8%; bottom: 22px; width: 42%; height: 58px; border-radius: 16px 16px 8px 8px;
+  background: #6f86c9;
+}
+.msg .photo em {
+  position: absolute; left: 14px; top: 14px; font-style: normal; font-weight: 800; font-size: 14px;
+  background: var(--good); color: #05331f; padding: 4px 10px; border-radius: 999px;
+}
+.msg .txt { padding: 14px 18px 12px; }
+.msg .title { font-weight: 800; font-size: 21px; }
+.msg .price { font-weight: 800; font-size: 26px; margin: 4px 0 6px; }
+.msg .price span { color: var(--good); font-size: 18px; font-weight: 700; margin-left: 8px; }
+.msg .meta { color: #b9c5ee; }
+.msg .time { text-align: right; color: #8fa3d9; font-size: 14px; padding: 0 16px 10px; }
+.btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.btns div {
+  text-align: center; padding: 12px; border-radius: 14px; font-weight: 700; font-size: 17px;
+  background: rgba(91, 140, 255, .22); color: #dbe5ff;
+}

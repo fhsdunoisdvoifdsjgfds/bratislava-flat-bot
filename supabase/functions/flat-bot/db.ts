@@ -19,7 +19,10 @@ export type Settings = {
   minTotal: number;
   maxTotal: number;
   agency: "any" | "private" | "agency";
-  districts: string[]; // пусто — все
+  // где искать: объявление подходит, если совпал край ИЛИ город ИЛИ район Братиславы; всё пусто — вся Словакия
+  regions: string[];
+  cities: string[];
+  districts: string[];
   withPhone: boolean;
   withPhoto: boolean;
   notify: {
@@ -34,6 +37,8 @@ export const DEFAULT_SETTINGS: Settings = {
   minTotal: 0,
   maxTotal: 650,
   agency: "any",
+  regions: [],
+  cities: [],
   districts: [],
   withPhone: false,
   withPhoto: false,
@@ -54,13 +59,21 @@ export function settingsOf(raw: any): Settings {
 }
 
 // проверка объявления против фильтров пользователя (для уведомлений)
+export const NO_LIMIT = 10_000; // «до 10 000 €» = без ограничения сверху
+
+export function inLocation(l: Pick<Listing, "region" | "city" | "district">, s: Settings) {
+  if (!s.regions.length && !s.cities.length && !s.districts.length) return true;
+  return (!!l.region && s.regions.includes(l.region)) || (!!l.city && s.cities.includes(l.city)) ||
+    (!!l.district && s.districts.includes(l.district));
+}
+
 export function matches(l: Listing, s: Settings): boolean {
   if (!s.kinds.includes(l.kind)) return false;
   const t = S.total(l);
-  if (t != null && (t > s.maxTotal || t < s.minTotal)) return false;
-  if (s.agency === "private" && l.agency === true) return false;
+  if (t != null && ((s.maxTotal < NO_LIMIT && t > s.maxTotal) || t < s.minTotal)) return false;
+  if (s.agency === "private" && l.agency !== false) return false; // только точно частные
   if (s.agency === "agency" && l.agency !== true) return false;
-  if (s.districts.length && !(l.district && s.districts.includes(l.district))) return false;
+  if (!inLocation(l, s)) return false;
   if (s.withPhone && !l.phones.length) return false;
   if (s.withPhoto && !l.images.length) return false;
   return true;
@@ -85,6 +98,8 @@ export function row(l: Listing, seeded: boolean) {
     fits: true,
     seeded,
     kind: l.kind,
+    region: l.region,
+    city: l.city,
     district: l.district,
     agency: l.agency,
     price: l.price,
@@ -107,11 +122,12 @@ export async function upsertListings(ls: Listing[], seeded: boolean) {
     await sql`
       insert into flatbot.listings ${sql(rows.slice(i, i + 200) as any)}
       on conflict (key) do update set
-        data = excluded.data, kind = excluded.kind, district = excluded.district, agency = excluded.agency,
+        data = excluded.data, kind = excluded.kind, region = excluded.region, city = excluded.city,
+        district = excluded.district, agency = excluded.agency,
         price = excluded.price, total = excluded.total, area = excluded.area, lat = excluded.lat, lng = excluded.lng,
         has_phone = excluded.has_phone, has_photo = excluded.has_photo, posted_at = excluded.posted_at,
         detailed = excluded.detailed, published = excluded.published, last_seen = now()
-      where flatbot.listings.kind is null`;
+      where flatbot.listings.kind is null or flatbot.listings.region is null`;
   }
 }
 
@@ -119,7 +135,8 @@ export async function upsertListings(ls: Listing[], seeded: boolean) {
 export async function saveDetailed(l: Listing) {
   await sql`
     update flatbot.listings set
-      data = ${sql.json(l as any)}, kind = ${l.kind}, district = ${l.district}, agency = ${l.agency},
+      data = ${sql.json(l as any)}, kind = ${l.kind}, region = ${l.region}, city = ${l.city},
+      district = ${l.district}, agency = ${l.agency},
       price = ${l.price}, total = ${S.total(l)}, area = ${l.area}, lat = ${l.lat}, lng = ${l.lng},
       has_phone = ${l.phones.length > 0}, has_photo = ${l.images.length > 0}, detailed = true
     where key = ${S.key(l)}`;
