@@ -29,6 +29,7 @@ export type Listing = {
   images: string[];
   text: string;
   published: string | null; // YYYY-MM-DD
+  publishedAt?: string | null; // точное время, если сайт его отдаёт
   availableFrom: string | null; // YYYY-MM-DD
   tags: string[];
   detailed: boolean;
@@ -355,6 +356,7 @@ export function nehnutelnosti(maxPrice: number, pageList = [1]) {
         .map((i: any) => (typeof i === "string" ? i : i?.url ?? i?.contentUrl))
         .filter((u: unknown) => typeof u === "string");
       l.published = it.validFrom ? bratislavaDate(new Date(it.validFrom)) : null;
+      l.publishedAt = it.validFrom ?? null;
       const seller = agents.get(it.offeredBy?.["@id"]);
       if (seller) {
         l.seller = seller;

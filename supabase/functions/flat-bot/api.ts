@@ -68,16 +68,16 @@ function where(f: Filters, user: User | null) {
 const MEDIANS = sql`
   med_d as (
     select kind, district, percentile_cont(0.5) within group (order by total) m, count(*) n
-    from flatbot.listings where kind is not null and total is not null and posted_at > now() - interval '30 days'
+    from flatbot.listings where kind is not null and total >= 80 and posted_at > now() - interval '30 days'
     group by kind, district),
   med_k as (
     select kind, percentile_cont(0.5) within group (order by total) m, count(*) n
-    from flatbot.listings where kind is not null and total is not null and posted_at > now() - interval '30 days'
+    from flatbot.listings where kind is not null and total >= 80 and posted_at > now() - interval '30 days'
     group by kind)`;
 
 const COMPACT = sql`
   l.key, l.source, l.kind, l.district, l.agency, l.price, l.total, l.area, l.lat, l.lng,
-  l.has_phone, l.posted_at, l.detailed,
+  l.has_phone, l.posted_at, l.detailed, l.seeded, l.published,
   l.data->>'title' as title, l.data->>'utilities' as utilities, (l.data->>'charges')::int as charges,
   (l.data->>'rooms')::float as rooms, l.data->>'seller' as seller, (l.data->>'commission')::boolean as commission,
   l.data->'images'->>0 as img, jsonb_array_length(coalesce(l.data->'images', '[]')) as img_count,
@@ -175,17 +175,18 @@ async function listing(body: any, user: User | null) {
 async function stats() {
   const [byDistrict, byKind, bySource, perDay, [totals]] = await Promise.all([
     sql`select district, percentile_cont(0.5) within group (order by total) as median, count(*)::int as n
-        from flatbot.listings where kind is not null and total is not null and posted_at > now() - interval '30 days'
-          and kind in ('flat', 'studio')
+        from flatbot.listings where kind is not null and total >= 80 and posted_at > now() - interval '30 days'
+          and kind in ('flat', 'studio') and district is not null
         group by district having count(*) >= 3 order by median`,
     sql`select kind, percentile_cont(0.5) within group (order by total) as median,
           min(total) as min, count(*)::int as n
-        from flatbot.listings where kind is not null and total is not null and posted_at > now() - interval '30 days'
+        from flatbot.listings where kind is not null and total >= 80 and posted_at > now() - interval '30 days'
         group by kind`,
     sql`select source, count(*)::int as n from flatbot.listings
         where kind is not null and posted_at > now() - interval '30 days' group by source order by n desc`,
     sql`select (posted_at at time zone 'Europe/Bratislava')::date as day, count(*)::int as n
         from flatbot.listings where kind is not null and posted_at > now() - interval '14 days'
+          and not (seeded and published is null) -- у массово подгруженных без даты время неизвестно
         group by 1 order by 1`,
     sql`select count(*)::int as total,
           count(*) filter (where posted_at > now() - interval '24 hours')::int as new24,

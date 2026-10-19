@@ -74,7 +74,8 @@ export function row(l: Listing, seeded: boolean) {
   // время публикации: дата с сайта, иначе «сейчас» (а для массовой подгрузки — «вчера»,
   // чтобы старые объявления без даты не выглядели свежими)
   let posted = new Date();
-  if (l.published && l.published !== today) posted = new Date(`${l.published}T12:00:00+02:00`);
+  if (l.publishedAt && +new Date(l.publishedAt) < Date.now()) posted = new Date(l.publishedAt);
+  else if (l.published && l.published !== today) posted = new Date(`${l.published}T12:00:00+02:00`);
   else if (!l.published && seeded) posted = new Date(Date.now() - 1.5 * DAY);
   return {
     key: S.key(l),

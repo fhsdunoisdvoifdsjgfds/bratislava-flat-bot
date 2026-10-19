@@ -269,7 +269,12 @@
     else util = "энергии — уточнить";
     return { total, util };
   }
-  const isNew = (it) => Date.now() - new Date(it.posted_at) < 86400000;
+  const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Bratislava" });
+  // у объявлений из первичной подгрузки точного времени нет — показываем дату
+  const when = (it) =>
+    it.seeded ? (it.published ? (String(it.published).slice(0, 10) === today() ? "сегодня" : dateRu(it.published, { day: "numeric", month: "short" })) : "ранее") : ago(it.posted_at);
+  const isNew = (it) =>
+    it.seeded ? !!it.published && String(it.published).slice(0, 10) === today() : Date.now() - new Date(it.posted_at) < 86400000;
   function pillsHTML(it, compact = false) {
     const p = [];
     if (it.deal != null && it.deal <= -8) p.push(`<span class="pill good">${ic("spark")}−${Math.abs(it.deal)}% к рынку</span>`);
@@ -302,7 +307,7 @@
           <div class="p num">${total != null ? fmt(total) + " €" : "?"}${isNew(it) ? '<span class="badge new">NEW</span>' : ""}</div>
           <div class="ttl">${esc(it.title)}</div>
           <div class="meta">${metaHTML(it)}</div>
-          <div class="pills">${pillsHTML(it, true)}<span class="pill">${esc(ago(it.posted_at))}</span></div>
+          <div class="pills">${pillsHTML(it, true)}<span class="pill">${esc(when(it))}</span></div>
         </div>
       </button>`;
     }
@@ -316,7 +321,7 @@
       </div>
       <div class="body">
         <div class="ttl">${esc(it.title)}</div>
-        <div class="meta">${tile ? `<span>${esc(districtName(it.district) ?? KIND[it.kind]?.name ?? "")}</span>` : metaHTML(it) + `<span>${esc(ago(it.posted_at))}</span>`}</div>
+        <div class="meta">${tile ? `<span>${esc(districtName(it.district) ?? KIND[it.kind]?.name ?? "")}</span>` : metaHTML(it) + `<span>${esc(when(it))}</span>`}</div>
         ${tile ? "" : `<div class="pills">${pillsHTML(it)}</div>`}
       </div>
     </button>`;
@@ -401,7 +406,7 @@
     return `<button class="timer" id="timer" aria-label="До следующей проверки">
       <svg viewBox="0 0 36 36"><circle class="ring-bg" cx="18" cy="18" r="15" fill="none" stroke-width="4"/>
       <circle class="ring" cx="18" cy="18" r="15" fill="none" stroke-width="4" stroke-dasharray="94.25" stroke-dashoffset="0"/></svg>
-      <span><span class="muted">проверка через</span><b id="timer-t">--:--</b></span></button>`;
+      <span><span class="muted">проверка</span><b id="timer-t">--:--</b></span></button>`;
   }
   let lastTick = 0, checkSeen = nextCheck();
   setInterval(() => {
@@ -477,18 +482,20 @@
   function renderFeed() {
     const scr = $("#screen");
     scr.innerHTML = `
-      <header class="top" id="feedtop">
+      <header class="top flat">
         <div class="top-row">
           <div style="flex:1;min-width:0"><h1 class="title">Жильё в Братиславе</h1><div class="subtitle" id="subline">${esc(subline())}</div></div>
           ${timerHTML()}
         </div>
         <label class="search">${ic("search")}<input id="q" type="search" placeholder="Улица, район, слово из описания" value="${esc(st.q)}" enterkeyhint="search"></label>
+      </header>
+      <div class="stickybar" id="feedtop">
         <div class="chips" id="chips">${chipsHTML()}</div>
         <div class="bar" style="padding:8px 0 2px">
           <button class="sort" data-act="sort">${ic("sort")}${esc(SORTS.find((s) => s.k === st.sort)?.name)}</button>
           <div class="seg" id="views">${VIEWS.map(([k, i]) => `<button data-view="${k}" class="${st.view === k ? "on" : ""}" aria-label="${k}">${ic(i)}</button>`).join("")}</div>
         </div>
-      </header>
+      </div>
       ${inTG ? "" : `<div class="banner">ℹ️<div><b>Режим просмотра</b>Откройте приложение через бота, чтобы сохранялись избранное, напоминания и уведомления.</div></div>`}
       <button class="chip on" id="newbar" hidden style="margin:6px auto 0;display:flex"></button>
       <div class="bar"><span class="count" id="count">Загружаю…</span></div>
@@ -785,10 +792,10 @@
     return leaflet;
   }
   const isDark = () => (tg ? tg.colorScheme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches);
-  function tiles(L) {
-    const style = isDark() ? "dark_all" : "rastertiles/voyager";
-    return L.tileLayer(`https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`, {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+  function tiles(L, node) {
+    node?.classList.toggle("dark-tiles", isDark());
+    return L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 19,
     });
   }
@@ -803,6 +810,7 @@
     feed.innerHTML = "";
     $("#count").textContent = "Загружаю карту…";
     destroyMap();
+    window.scrollTo(0, 0);
     const top = $("#feedtop").getBoundingClientRect().bottom;
     const wrap = el(`<div class="mapwrap" style="top:${top}px"><div id="map" style="height:100%"></div></div>`);
     document.body.append(wrap);
@@ -810,7 +818,7 @@
       const [L, r] = await Promise.all([loadLeaflet(), api("map", { filters: { ...st.filters, q: st.q } })]);
       if (st.view !== "map" || !document.body.contains(wrap)) return;
       map = L.map("map", { zoomControl: false, attributionControl: true }).setView(BA_CENTER, 12);
-      tiles(L).addTo(map);
+      tiles(L, $("#map")).addTo(map);
       mapMarkers = r.points.map((p) => {
         const m = L.marker([p.lat, p.lng], {
           icon: L.divIcon({ className: "", html: `<div class="mappin" data-k="${esc(p.key)}">${p.total != null ? fmt(p.total) + " €" : "?"}</div>`, iconSize: [0, 0] }),
@@ -845,7 +853,7 @@
       const L = await loadLeaflet();
       const m = L.map(node, { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, touchZoom: false, doubleClickZoom: false })
         .setView([lat, lng], 15);
-      tiles(L).addTo(m);
+      tiles(L, node).addTo(m);
       L.circleMarker([lat, lng], { radius: 9, color: "#fff", weight: 3, fillColor: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2f6bff", fillOpacity: 1 }).addTo(m);
     } catch { /* без карты */ }
   }
@@ -919,23 +927,23 @@
       ["Источник", SOURCES[it.source]],
     ].filter(([, v]) => v);
 
-    const sellerKind = it.agency === true ? "Агентство недвижимости" : it.agency === false ? "Частное лицо" : "Продавец";
+    const sellerKind = it.agency === true ? "Агентство недвижимости" : it.agency === false ? "Частное лицо" : "Тип продавца не указан";
     const initials = (it.seller || sellerKind).replace(/[^\p{L} ]/gu, "").split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
     const contacts = `
-      <div class="contact"><div class="avatar">${esc(initials)}</div><div class="who"><b>${esc(it.seller || sellerKind)}</b><small>${esc(sellerKind)}${it.commission ? " · есть комиссия" : ""}</small></div>
+      <div class="contact"><div class="avatar">${esc(initials)}</div><div class="who"><b>${esc(it.seller || "Контакт из объявления")}</b><small>${esc(sellerKind)}${it.commission ? " · есть комиссия" : ""}</small></div>
         ${it.agency === false ? '<span class="pill good">без комиссии</span>' : it.agency === true ? '<span class="pill">RK</span>' : ""}</div>
       ${(it.phones ?? []).map((p) => `
-        <div class="contact"><div class="who"><b>${esc(p.replace(/^\+(\d{3})(\d{3})(\d{3})(\d{3})$/, "+$1 $2 $3 $4"))}</b><small>телефон из объявления</small></div>
-          <button class="icon-btn" data-copy="${esc(p)}" aria-label="Скопировать">${ic("copy")}</button>
-          <button class="btn sm good" data-call="${esc(p)}">${ic("phone")}Позвонить</button></div>`).join("")}
+        <div class="contact"><div class="who"><b class="ph num">${esc(p.replace(/^\+(\d{3})(\d{3})(\d{3})(\d{3})$/, "+$1 $2 $3 $4"))}</b><small>телефон из объявления</small></div>
+          <button class="round ghost" data-copy="${esc(p)}" aria-label="Скопировать номер">${ic("copy")}</button>
+          <button class="round call" data-call="${esc(p)}" aria-label="Позвонить">${ic("phone")}</button></div>`).join("")}
       ${(it.emails ?? []).map((m) => `
         <div class="contact"><div class="who"><b style="font-size:15px">${esc(m)}</b><small>e-mail</small></div>
           <button class="icon-btn" data-copy="${esc(m)}">${ic("copy")}</button>
           <a class="btn sm ghost" href="mailto:${esc(m)}?subject=${encodeURIComponent(it.title)}&body=${encodeURIComponent(TEMPLATE(it.title))}">${ic("mail")}Написать</a></div>`).join("")}
       ${!(it.phones ?? []).length ? `<div class="contact"><div class="who"><small>${it.source === "bazos" ? "Bazoš показывает номер только после входа — откройте объявление на сайте и нажмите «zobraziť číslo»." : it.source === "bezrealitky" ? "На Bezrealitky написать владельцу можно через сайт после входа." : "Телефон в тексте не указан — свяжитесь через сайт."}</small></div></div>` : ""}
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn sm plain" style="flex:1" data-template>${ic("msg")}Текст сообщения (SK)</button>
-        <button class="btn sm plain" style="flex:1" data-site>${ic("ext")}На сайте</button>
+      <div style="display:grid;gap:8px;margin-top:8px">
+        <button class="btn sm plain block" data-template>${ic("msg")}Скопировать сообщение продавцу (SK)</button>
+        <button class="btn sm plain block" data-site>${ic("ext")}Открыть объявление на сайте</button>
       </div>`;
 
     page.innerHTML = `
@@ -1065,7 +1073,7 @@
       <div class="presets">${ps.map((p, i) => `<button class="preset ${i === 1 ? "on" : ""}" data-i="${i}"><b>${p.name}</b><small>${esc(p.hint)}</small></button>`).join("")}</div>
       <label class="cell card2" style="margin:0 0 12px;gap:10px"><span class="lbl">Своё время</span><input type="datetime-local" id="r-dt" style="width:auto"></label>
       <textarea id="r-note" maxlength="300" placeholder="Заметка: например «позвонить хозяину после 17:00»"></textarea>
-      <div class="chips" style="margin:0;padding:8px 0 0">${["Позвонить", "Посмотреть квартиру", "Отправить документы", "Ответить на сообщение"].map((t) => `<button class="chip" data-note="${t}">${t}</button>`).join("")}</div>
+      <div class="dchips" style="margin-top:8px">${["Позвонить", "Посмотреть квартиру", "Отправить документы", "Ответить на сообщение"].map((t) => `<button class="chip" data-note="${t}">${t}</button>`).join("")}</div>
       <div class="sheet-foot"><button class="btn block" id="r-save">${ic("bell")}Напомнить ${esc(ps[1].hint)}</button></div>`);
     const btn = $("#r-save", s);
     const setChosen = (d) => {
@@ -1245,7 +1253,7 @@
 
       <div class="group-title">Новые объявления по дням</div>
       <div class="card2"><div class="vbars">${(s.perDay ?? []).map((d, i, a) => `
-        <div class="vb" title="${esc(dateRu(d.day, { day: "numeric", month: "long" }))}: ${d.n}">${i === a.length - 1 || d.n === maxDay ? `<span class="tip num">${d.n}</span>` : ""}<i style="height:${(d.n / maxDay) * 100}%"></i><span>${new Date(d.day).getDate()}</span></div>`).join("")}</div>
+        <div class="vb" title="${esc(dateRu(d.day, { day: "numeric", month: "long" }))}: ${d.n}">${i === a.length - 1 || (d.n === maxDay && i < a.length - 2) ? `<span class="tip num">${d.n}</span>` : ""}<i style="height:${(d.n / maxDay) * 100}%"></i><span>${new Date(d.day).getDate()}</span></div>`).join("")}</div>
         <div class="legend-note">Подписаны максимум и сегодняшний день. Нажмите и удерживайте столбик, чтобы увидеть число.</div></div>
 
       <div class="group-title">Откуда объявления</div>
@@ -1410,7 +1418,7 @@
       {
         html: () => `<h1>Какой бюджет?</h1><p class="lead">Считаю цену <b>вместе с энергиями</b>, если они указаны в объявлении.</p>
           <div class="card2" style="margin:0;padding:20px 16px">${budgetHTML(s.minTotal, s.maxTotal, "ob")}</div>
-          <div class="chips" style="margin:14px 0 0;padding:0">${[400, 500, 650, 800].map((v) => `<button class="chip" data-quick="${v}">до ${v} €</button>`).join("")}</div>`,
+          <div class="dchips" style="margin-top:14px">${[400, 500, 650, 800].map((v) => `<button class="chip" data-quick="${v}">до ${v} €</button>`).join("")}</div>`,
         bind: (r) => {
           bindBudget(r, "ob", s);
           r.addEventListener("click", (e) => {
@@ -1465,7 +1473,7 @@
         html: () => `<div class="hero" style="height:150px"><i></i><i></i><i></i><span class="big" style="font-size:70px">🎉</span></div>
           <div class="big-count"><b class="num" id="ob-count">…</b><span class="muted">подходящих объявлений прямо сейчас</span></div>
           <div class="summary">
-            <div class="kv" style="padding:10px 16px"><span>Ищем</span><b>${esc(s.kinds.map((k) => KIND[k].short).join(", "))}</b></div>
+            <div class="kv" style="padding:10px 16px"><span>Ищем</span><b>${esc(s.kinds.length === 4 ? "любое жильё" : s.kinds.map((k) => KIND[k].short).join(", "))}</b></div>
             <div class="kv" style="padding:10px 16px"><span>Бюджет</span><b>${s.minTotal ? fmt(s.minTotal) + "–" : "до "}${fmt(s.maxTotal)} €</b></div>
             <div class="kv" style="padding:10px 16px"><span>Где</span><b>${s.districts.length ? `${s.districts.length} ${plural(s.districts.length, "район", "района", "районов")}` : "везде"}</b></div>
             <div class="kv" style="padding:10px 16px"><span>Агентства</span><b>${AGENCY.find((a) => a.k === s.agency).name}</b></div>
