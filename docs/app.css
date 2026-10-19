@@ -614,3 +614,14 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .dtop .icon-btn { position: relative; }
 .dtop.solid .icon-btn { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--line) inset; }
 .dtop.solid .icon-btn.on { color: #ff4d6d; }
+
+/* быстрый выбор языка в шапке ленты */
+.lang-btn { width: 40px; height: 40px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--surface); box-shadow: var(--shadow), 0 0 0 1px var(--line) inset; transition: transform .15s var(--ease); font-size: 20px; }
+.lang-btn:active { transform: scale(.92); }
+.lang-btn svg { width: 26px; height: 18px; border-radius: 4px; display: block; }
+@media (max-width: 420px) {
+  .timer .muted { display: none; }
+  .timer { padding-right: 10px; }
+}
+.title .loc-title { font-size: 21px; gap: 4px; }
+.title .loc-title svg { width: 16px; height: 16px; }

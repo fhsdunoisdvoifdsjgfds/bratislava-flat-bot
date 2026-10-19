@@ -1906,14 +1906,9 @@
       return null;
     }
   }
+  // язык не выбран (или что-то пошло не так) — английский; выбирают его на приветственном экране
   function detect() {
-    const s = saved();
-    if (s) return s;
-    const tgCode = window.Telegram?.WebApp?.initDataUnsafe?.user?.language_code;
-    if (tgCode) return norm(tgCode) ?? "en";
-    // вне Telegram — язык браузера по тем же правилам
-    const nav = (navigator.languages ?? [navigator.language]).map(norm).find(Boolean);
-    return nav ?? "en";
+    return saved() ?? "en";
   }
 
   let cur = detect();
@@ -1921,7 +1916,7 @@
   const fill = (s, vars) => (vars ? String(s).replace(/\{(\/?\w+)\}/g, (m, k) => (vars[k] != null ? String(vars[k]) : m)) : String(s));
 
   function t(key, vars) {
-    const s = D[cur]?.[key] ?? D.ru[key];
+    const s = D[cur]?.[key] ?? D.en[key] ?? D.ru[key];
     if (s == null) return key;
     return fill(Array.isArray(s) ? s[s.length - 1] : s, vars);
   }
@@ -1929,8 +1924,8 @@
     let lang = cur;
     let forms = D[cur]?.[key];
     if (!Array.isArray(forms)) {
-      lang = "ru";
-      forms = D.ru[key];
+      lang = Array.isArray(D.en[key]) ? "en" : "ru";
+      forms = D[lang][key];
     }
     if (!Array.isArray(forms)) return key;
     const i = Math.min(RULES[lang](Math.abs(Math.round(+n || 0))), forms.length - 1);

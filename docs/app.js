@@ -513,6 +513,7 @@
       <header class="top flat">
         <div class="top-row">
           <div style="flex:1;min-width:0"><h1 class="title"><button class="loc-title" data-act="loc" id="loc-title"><span>${esc(locLabel(st.filters))}</span>${ic("down")}</button></h1><div class="subtitle" id="subline">${esc(subline())}</div></div>
+          <button class="lang-btn" id="lang-btn" aria-label="Language">${langInfo(I18N.getLang()).flag || "🌐"}</button>
           ${timerHTML()}
         </div>
         <label class="search">${ic("search")}<input id="q" type="search" placeholder="${esc(t("feed.searchPh"))}" value="${esc(st.q)}" enterkeyhint="search"></label>
@@ -560,6 +561,7 @@
       }
     };
     $("#loc-title").onclick = () => (haptic.soft(), openLocation(st.filters, afterLoc));
+    $("#lang-btn").onclick = openLanguage;
     $("[data-act=sort]").onclick = openSort;
     $("#views").onclick = (e) => {
       const b = e.target.closest("[data-view]");

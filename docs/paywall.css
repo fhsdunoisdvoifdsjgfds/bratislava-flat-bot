@@ -46,3 +46,4 @@
 .fbp-spin { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid rgba(255, 255, 255, .4); border-top-color: #fff; animation: fbp-rot .8s linear infinite; }
 @keyframes fbp-rot { to { transform: rotate(360deg); } }
 @media (min-width: 640px) { .fbp > * { width: 100%; max-width: 560px; margin-left: auto; margin-right: auto; } }
+.fbp > * { flex-shrink: 0; } /* иначе шапка сжимается и обрезает подзаголовок */
