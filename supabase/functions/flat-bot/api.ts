@@ -292,8 +292,17 @@ export async function handleApi(body: any) {
     case "settings": {
       const u = need();
       const s = cleanSettings(body.settings);
+      const [prev] = await sql`select settings, onboarded from flatbot.subscribers where chat_id = ${u.id}`;
       await sql`update flatbot.subscribers set settings = ${sql.json(s as any)}, active = true,
                 onboarded = onboarded or ${!!body.onboarded} where chat_id = ${u.id}`;
+      // сообщение в чат: после онбординга — подтверждение с примерами, потом — «фильтр обновлён»
+      const { sendSetup, summaryKey } = await import("./notify.ts");
+      const first = !!body.onboarded && !prev?.onboarded;
+      const changed = prev && summaryKey(settingsOf(prev.settings)) !== summaryKey(s);
+      if (first || (changed && prev?.onboarded && s.notify.mode !== "off")) {
+        // @ts-ignore EdgeRuntime есть в среде Supabase
+        EdgeRuntime.waitUntil(sendSetup(u.id, s, first ? "welcome" : "updated").catch((e) => console.error("setup msg", e)));
+      }
       return { ok: true, settings: s };
     }
     case "fav": {
@@ -343,8 +352,9 @@ export async function handleApi(body: any) {
     }
     case "notify_test": {
       const u = need();
-      const { say } = await import("./tg.ts");
-      await say(u.id, "🔔 Тестовое уведомление: всё работает! Новые объявления будут приходить сюда.");
+      const [row] = await sql`select settings from flatbot.subscribers where chat_id = ${u.id}`;
+      const { sendSetup } = await import("./notify.ts");
+      await sendSetup(u.id, settingsOf(row?.settings), "test");
       return { ok: true };
     }
     default:

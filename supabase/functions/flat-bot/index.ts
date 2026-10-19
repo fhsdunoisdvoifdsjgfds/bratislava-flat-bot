@@ -279,8 +279,23 @@ async function handleUpdate(u: any) {
     const at = lc ? new Date(lc.at).toLocaleString("ru-RU", { timeZone: "Europe/Bratislava" }) : "";
     await say(chat_id, `🕒 Последняя проверка: ${at}\n${esc(lines)}`);
   } else if (isNew || cmd === "/start") {
-    await say(chat_id, "👋 <b>Привет!</b> " + HELP, { reply_markup: appButton() });
-    await sendToday(chat_id, 8);
+    const [me] = await sql`select onboarded from flatbot.subscribers where chat_id = ${chat_id}`;
+    if (!me?.onboarded) {
+      // сначала — настроить фильтр, иначе пришлось бы слать объявления со всей Словакии
+      await say(
+        chat_id,
+        "👋 <b>Привет! Я помогаю найти жильё в Словакии быстрее других.</b>\n\n" +
+          "Каждые 10 минут проверяю bazos, nehnutelnosti, topreality и bezrealitky и присылаю сюда новые " +
+          "объявления — с ценой, телефоном и кнопкой звонка. Хорошие варианты разбирают за пару часов, " +
+          "поэтому важно узнавать первым.\n\n" +
+          "<b>Нажмите кнопку ниже</b>, выберите город, бюджет и тип жилья — это займёт минуту. " +
+          "После этого уведомления начнут приходить сюда.",
+        { reply_markup: appButton("🚀 Настроить поиск") },
+      );
+    } else {
+      await say(chat_id, "👋 <b>С возвращением!</b> " + HELP, { reply_markup: appButton() });
+      await sendToday(chat_id, 8);
+    }
   } else if (cmd === "/today") {
     await sendToday(chat_id, 15);
   } else {
