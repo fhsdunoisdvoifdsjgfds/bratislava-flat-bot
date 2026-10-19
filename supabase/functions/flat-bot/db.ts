@@ -60,6 +60,8 @@ export function settingsOf(raw: any): Settings {
 
 // проверка объявления против фильтров пользователя (для уведомлений)
 export const NO_LIMIT = 10_000; // «до 10 000 €» = без ограничения сверху
+// дешевле — это мусор («1 €», «цена по договорённости» = 1) или посуточная аренда; без цены — тоже не показываем
+export const MIN_PRICE = 100;
 
 export function inLocation(l: Pick<Listing, "region" | "city" | "district">, s: Settings) {
   if (!s.regions.length && !s.cities.length && !s.districts.length) return true;
@@ -70,7 +72,8 @@ export function inLocation(l: Pick<Listing, "region" | "city" | "district">, s: 
 export function matches(l: Listing, s: Settings): boolean {
   if (!s.kinds.includes(l.kind)) return false;
   const t = S.total(l);
-  if (t != null && ((s.maxTotal < NO_LIMIT && t > s.maxTotal) || t < s.minTotal)) return false;
+  if (t == null || l.price == null || l.price < MIN_PRICE) return false;
+  if ((s.maxTotal < NO_LIMIT && t > s.maxTotal) || t < s.minTotal) return false;
   if (s.agency === "private" && l.agency !== false) return false; // только точно частные
   if (s.agency === "agency" && l.agency !== true) return false;
   if (!inLocation(l, s)) return false;
