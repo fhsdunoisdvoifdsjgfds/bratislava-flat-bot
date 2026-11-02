@@ -291,7 +291,7 @@
     let util;
     if (it.price == null) util = t("util.negotiable");
     else if (it.utilities === "included") util = t("util.included");
-    else if (it.utilities === "extra" && it.charges) util = t("util.extraSum", { sum: fmt(it.charges) });
+    else if (it.utilities === "extra" && it.charges) util = t("util.extraSum", { sum: (it.chargesEst ? "≈" : "") + fmt(it.charges) });
     else if (it.utilities === "extra") util = t("util.extra");
     else util = t("util.unknown");
     return { total, util };
@@ -1104,7 +1104,7 @@
     // цена: разбивка
     const rows = [];
     if (it.price != null) rows.push([t("price.rent"), `${fmt(it.price)} €`]);
-    if (it.utilities === "extra") rows.push([t("price.utilities"), it.charges ? `${fmt(it.charges)} €` : t("price.utilNotStated")]);
+    if (it.utilities === "extra") rows.push([t("price.utilities"), it.charges ? `${it.chargesEst ? "≈" : ""}${fmt(it.charges)} €` : t("price.utilNotStated")]);
     else if (it.utilities === "included") rows.push([t("price.utilities"), t("price.utilIncluded")]);
     else rows.push([t("price.utilities"), t("price.utilUnclear")]);
     if (it.deposit) rows.push([t("price.deposit"), `${fmt(it.deposit)} €`]);

@@ -36,7 +36,9 @@ export async function cfg() {
   const key = Deno.env.get("STRIPE_SECRET_KEY") || (await meta("stripe_secret_key")) || "";
   const price = Deno.env.get("STRIPE_PRICE_ID") || (await meta("stripe_price_id")) || "";
   const whsec = Deno.env.get("STRIPE_WEBHOOK_SECRET") || (await meta("stripe_webhook_secret")) || "";
-  return { key, price, whsec, enabled: !!(key && price) };
+  // flatbot.meta.free_mode = true — бот бесплатный для всех: без пейвола, лимитов и напоминаний об оплате
+  const free = (await meta("free_mode")) === true;
+  return { key, price, whsec, enabled: !!(key && price) && !free };
 }
 
 // form-urlencoded с вложенными ключами: { line_items: [{ price: "x" }] } → line_items[0][price]=x

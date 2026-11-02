@@ -86,7 +86,7 @@ const MEDIANS = sql`
 const COMPACT = sql`
   l.key, l.source, l.kind, l.region, l.city, l.data->>'cityName' as city_name, l.district, l.agency, l.price, l.total, l.area, l.lat, l.lng,
   l.has_phone, l.posted_at, l.detailed, l.seeded, l.published,
-  l.data->>'title' as title, l.data->>'utilities' as utilities, (l.data->>'charges')::int as charges,
+  l.data->>'title' as title, l.data->>'utilities' as utilities, (l.data->>'charges')::int as charges, (l.data->>'chargesEst')::boolean as "chargesEst",
   (l.data->>'rooms')::float as rooms, l.data->>'seller' as seller, (l.data->>'commission')::boolean as commission,
   l.data->'images'->>0 as img, jsonb_array_length(coalesce(l.data->'images', '[]')) as img_count,
   l.data->'tags' as tags,

@@ -14,6 +14,7 @@ export type Listing = {
   title: string;
   price: number | null; // аренда, €/мес
   charges: number | null; // энергии/поплатки, €/мес
+  chargesEst?: boolean; // сумма энергий не указана — подставлена типичная (для фильтра по цене)
   utilities: "included" | "extra" | "unknown";
   deposit: number | null; // залог, €
   commission: boolean | null; // есть ли комиссия агентства
@@ -173,9 +174,9 @@ export const prettyPhone = (n: string) => n.replace(/^\+(\d{3})(\d{3})(\d{3})(\d
 
 // ---------------------------------------------------------------- разбор текста
 const RE_INCLUDED =
-  /vratane\s+(energi|poplatk|sluz|vsetk)|s\s+energiami|energie\s+(su\s+)?v\s+cene|v\s+cene\s+(su\s+)?(aj\s+)?(energi|poplatk|sluz)|vsetko\s+v\s+cene|all\s+(bills|utilities)\s+included|including\s+(bills|utilities)|cena\s+je\s+konecn|\bkomplet\b|\bvcetne\s+energi|bez\s+dalsich\s+poplatkov/;
+  /vratane\s+(spotreby\s+)?(energi|poplatk|sluz|vsetk)|spolu\s+s\s+(energi|poplatk|sluzb)|vcitane\s+(energi|poplatk|sluz)|s\s+energiou\b|energie\s+(su\s+)?zahrnut|zahrnut\w*\s+(aj\s+)?energi|s\s+energiami|energie\s+(su\s+)?v\s+cene|v\s+cene\s+(su\s+)?(aj\s+)?(energi|poplatk|sluz)|vsetko\s+v\s+cene|all\s+(bills|utilities)\s+included|including\s+(bills|utilities)|cena\s+je\s+konecn|\bkomplet\b|\bvcetne\s+energi|bez\s+dalsich\s+poplatkov/;
 const RE_EXTRA =
-  /\+\s*energi|plus\s+energi|\+\s*poplatk|plus\s+poplatk|bez\s+energi|\+\s*sluzby|\+\s*utilities|\+\s*bills|energie\s+(navyse|zvlast|samostatne)|\+\s*zalohy\s+na\s+energi|\+\s*naklady/;
+  /\+\s*energi|\+\s*elektrin|\+\s*plyn|\+\s*spotreb|nezahrn\w*\s+(su\s+)?energi|energie\s+(sa\s+)?(plati|hradi)\w*\s+(zvlast|samostatne|podla)|plus\s+energi|\+\s*poplatk|plus\s+poplatk|bez\s+energi|\+\s*sluzby|\+\s*utilities|\+\s*bills|energie\s+(navyse|zvlast|samostatne)|\+\s*zalohy\s+na\s+energi|\+\s*naklady/;
 // ---------------------------------------------------------------- агентство или частник
 // Баллы: > 0 — агентство, < 0 — частник. Сначала ищем явные слова частника
 // («RK nevolať» содержит «RK», но означает как раз владельца).
@@ -231,6 +232,36 @@ function isShortTerm(l: Listing) {
   return false;
 }
 
+// Сумма энергий/платежей. Варианты из объявлений:
+// «500 € + 100€ -energie», «530 € nájom + 150 € energie», «+ cca 110 eur/mesiac energie», «+ 160,- eur/mes. energie»,
+// «energie 35-40€/m.», «zálohy na energie: 120 €», «500 € + 80 € za energie, spolu 580 €»
+const AMT = String.raw`(\d{2,3})(?:\s*[-–]\s*(\d{2,3}))?\s*(?:,-+|\.-+)?\s*(?:€|eur\w*|e\b)?`;
+const PER = String.raw`(?:\s*\/?\s*(?:mes\w*|m)\b\.?)?`;
+const ABOUT = String.raw`(?:cca\.?|asi|priblizne|pribl\.|okolo|max\.?|do)?\s*`;
+const WHAT = String.raw`(?:energi|elektrin|plyn|poplatk|sluzb|zaloh|naklad|utilit|bills|spotreb|rezij)`;
+const RE_PLUS_AMT = new RegExp(String.raw`\+\s*${ABOUT}${AMT}${PER}\s*[-–:]?\s*(?:za\s+|na\s+)?${WHAT}`);
+const RE_WORD_AMT = new RegExp(
+  String.raw`(?:energi\w*|elektrin\w*|zalohy?\s+(?:na\s+)?(?:energi|sluzb)\w*|sluzby|mesacn\w*\s+poplatk\w*|poplatk\w*\s+za\s+(?:energi|sluzb)\w*|naklady\s+na\s+\w+|rezij\w*)` +
+    String.raw`[^\d\n€]{0,25}?${ABOUT}${AMT}`,
+);
+const RE_SUM = /spolu\s*(?:je\s*|:\s*)?(\d{3,4})\s*(?:€|eur)/;
+function findCharges(f: string, price: number | null): number | null {
+  const ok = (n: number) => n >= 20 && n <= 400;
+  for (const re of [RE_PLUS_AMT, RE_WORD_AMT]) {
+    const m = f.match(re);
+    if (!m) continue;
+    // комиссия/залог рядом со словом «poplatok» — не энергии
+    if (/provizi|rk\b|realitn|zmluv|kauci|depozit/.test(f.slice(Math.max(0, m.index! - 30), m.index! + m[0].length))) continue;
+    const n = Math.max(+m[1], +(m[2] ?? 0)); // «35-40 €» — берём верхнюю границу
+    if (ok(n) && n !== price) return n;
+  }
+  const s = f.match(RE_SUM);
+  if (s && price && /\+/.test(f) && ok(+s[1] - price)) return +s[1] - price;
+  return null;
+}
+// «+ energie» без суммы: типичные платежи в Словакии, чтобы фильтр «до N € с энергиями» не пропускал такие
+const TYPICAL_CHARGES: Record<Kind, number> = { studio: 120, flat: 170, room: 60, hostel: 0 };
+
 function parseText(l: Listing) {
   const f = fold(`${l.title}\n${l.text}`);
   if (!l.shortTerm) l.shortTerm = isShortTerm(l);
@@ -240,11 +271,12 @@ function parseText(l: Listing) {
     else if (RE_INCLUDED.test(f)) l.utilities = "included";
   }
   // сумма энергий, если она написана в тексте
-  if (l.charges == null && l.utilities !== "included") {
-    const m = f.match(/(?:energi\w*|poplatk\w*|sluzby|zalohy na energie)[^\d\n]{0,25}(\d{2,3})\s*(?:€|eur|,-)/);
-    if (m && +m[1] >= 20 && +m[1] <= 400) {
-      l.charges = +m[1];
-      if (l.utilities === "unknown") l.utilities = "extra";
+  if (l.charges == null || l.chargesEst) {
+    const c = findCharges(f, l.price);
+    if (c) {
+      l.charges = c;
+      l.chargesEst = false;
+      l.utilities = "extra"; // «500 € + 100 € energie» — явная доплата важнее общих фраз про «v cene»
     }
   }
   if (l.deposit == null) {
@@ -298,6 +330,11 @@ function classify(l: Listing, hint: Kind | null) {
 export function finalize(l: Listing, hint: Kind | null = null) {
   parseText(l);
   classify(l, hint);
+  if (l.utilities === "extra" && (l.charges == null || l.chargesEst)) {
+    const rooms = l.kind === "flat" && l.rooms && l.rooms > 2 ? (l.rooms - 2) * 40 : 0;
+    l.charges = TYPICAL_CHARGES[l.kind] + rooms || null;
+    l.chargesEst = !!l.charges;
+  }
   if (!l.city && !l.region) locate(l); // местоположение ещё не определяли
   const all = `${l.title}\n${l.text}`;
   l.phones = [...new Set([...l.phones, ...findPhones(all)])].slice(0, 3);

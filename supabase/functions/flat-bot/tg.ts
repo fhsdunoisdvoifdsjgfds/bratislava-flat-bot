@@ -62,7 +62,10 @@ export const placeName = (l: Pick<Listing, "cityName" | "district">) =>
 export function priceLine(l: Listing, lang: Lang): string {
   const t = S.total(l);
   if (l.price == null) return tr(lang, "price.negotiable");
-  if (l.utilities === "extra" && l.charges) return tr(lang, "price.split", { total: t ?? l.price, price: l.price, charges: l.charges });
+  if (l.utilities === "extra" && l.charges) {
+    const est = l.chargesEst ? "≈" : ""; // сумма энергий не указана — типичная оценка
+    return tr(lang, "price.split", { total: est + (t ?? l.price), price: l.price, charges: est + l.charges });
+  }
   if (l.utilities === "included") return tr(lang, "price.included", { price: l.price });
   if (l.utilities === "extra") return tr(lang, "price.extra", { price: l.price });
   return tr(lang, "price.unknown", { price: l.price });
@@ -117,7 +120,7 @@ export async function sendDigest(chat_id: number, ls: Listing[], title: string, 
     const t = S.total(l) ?? l.price;
     const d = placeName(l) ?? "";
     const k = kindLabel(lang, l.kind);
-    return `• <b>${t ?? "?"} €</b>${k ? " · " + esc(k) : ""}${d ? " · " + esc(d) : ""}\n  <a href="${esc(l.url)}">${esc(l.title.slice(0, 70))}</a>`;
+    return `• <b>${l.chargesEst ? "≈" : ""}${t ?? "?"} €</b>${k ? " · " + esc(k) : ""}${d ? " · " + esc(d) : ""}\n  <a href="${esc(l.url)}">${esc(l.title.slice(0, 70))}</a>`;
   });
   const more = ls.length > 12 ? "\n" + tr(lang, "digest.more", { n: ls.length - 12 }) : "";
   await say(chat_id, `${title}\n\n${lines.join("\n")}${more}`, {
