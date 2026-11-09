@@ -73,6 +73,19 @@ async function enrich(ls: Listing[], limit: number, workers = 4) {
   await Promise.all(Array.from({ length: workers }, run));
 }
 
+// продавец на Bazoši с 3+ разными объявлениями и «фирменным» именем — агентство.
+// Полный проход по таблице (~0,7 с): раньше гоняли каждую минуту в tick(), хотя новые
+// объявления появляются только в check()/backfill — теперь только там.
+async function markAgencies() {
+  await sql`
+    update flatbot.listings set agency = true, data = jsonb_set(data, '{agency}', 'true')
+    where source = 'bazos' and agency is not true and data->>'seller' in (
+      select data->>'seller' from flatbot.listings
+      where source = 'bazos' and data->>'seller' is not null and length(data->>'seller') >= 6
+        and data->>'seller' !~ '^[[:upper:]][[:lower:]]+( [[:upper:]][[:lower:]]+)?$'
+      group by 1 having count(distinct data->>'title') >= 3)`;
+}
+
 async function check() {
   // вся Словакия: свежие страницы каждого сайта (у nehnutelnosti — по каждому краю)
   const { listings, stats } = await collect({
@@ -87,7 +100,10 @@ async function check() {
   const existing = new Map<string, string | null>(
     (await sql`select key, kind from flatbot.listings where key = any(${keys}::text[])`).map((r: any) => [r.key, r.kind]),
   );
-  await sql`update flatbot.listings set last_seen = now() where key = any(${keys}::text[])`;
+  // last_seen никто не читает; раньше перезаписывали ~400 строк (с jsonb) каждые 10 минут —
+  // гигабайты WAL и перегруз дискового IO. Теперь — не чаще раза в сутки на объявление.
+  await sql`update flatbot.listings set last_seen = now()
+    where key = any(${keys}::text[]) and last_seen < now() - interval '1 day'`;
   // посуточное/отпуск/спа и цены ниже 150 € не сохраняем и не рассылаем
   const fresh = listings.filter((l) => !existing.has(S.key(l)) && !l.shortTerm);
   const legacy = listings.filter((l) => existing.has(S.key(l)) && existing.get(S.key(l)) == null);
@@ -97,6 +113,7 @@ async function check() {
   await enrich(fresh, 30, 6);
   await upsertListings(fresh, !ready);
   await upsertListings(legacy, true);
+  await markAgencies();
 
   let sent = 0, queued = 0;
   if (ready && fresh.length) {
@@ -145,6 +162,7 @@ async function backfill(src: string) {
   if (!jobs[src]) return { error: "unknown src" };
   const { listings, stats } = await collect({ [src]: jobs[src] });
   await upsertListings(listings, true);
+  await markAgencies();
   await setMeta("v2_ready", true);
   return { stats };
 }
@@ -218,14 +236,7 @@ async function tick() {
   // напоминания об оплате (повторно, не чаще раза в сутки, максимум 3 раза)
   await nagTick().catch((e) => console.error("nag", e));
 
-  // 3) продавец на Bazoši с 3+ разными объявлениями и «фирменным» именем — агентство
-  await sql`
-    update flatbot.listings set agency = true, data = jsonb_set(data, '{agency}', 'true')
-    where source = 'bazos' and agency is not true and data->>'seller' in (
-      select data->>'seller' from flatbot.listings
-      where source = 'bazos' and data->>'seller' is not null and length(data->>'seller') >= 6
-        and data->>'seller' !~ '^[[:upper:]][[:lower:]]+( [[:upper:]][[:lower:]]+)?$'
-      group by 1 having count(distinct data->>'title') >= 3)`;
+  // 3) агентства помечает markAgencies() в check()/backfill — сразу после записи объявлений
 
   // 4) потихоньку дочитываем карточки, которые ещё не открывали
   const todo = await sql`
